@@ -6,16 +6,13 @@ import (
 	"net/http"
 )
 
-// TemplateData defines the data passed to HTML templates
 type TemplateData struct {
 	Port        int
 	HostAddress string
 }
 
-// IndexHandler returns an http.HandlerFunc that serves the index page with template data
 func IndexHandler(port int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Get host from request or use localhost if not available
 		host := r.Host
 		if host == "" {
 			host = "localhost"
@@ -43,7 +40,6 @@ func IndexHandler(port int) http.HandlerFunc {
 	}
 }
 
-// indexTemplate is the HTML template for the index page
 const indexTemplate = `<!DOCTYPE html>
 <html lang="en">
 <head>

@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/aran/mdns-caddy/pkg/caddy"
-	"github.com/aran/mdns-caddy/pkg/html"
-	"github.com/aran/mdns-caddy/pkg/mdns"
-	"github.com/aran/mdns-caddy/pkg/profile"
+	"github.com/aran/mdns-caddy/internal/caddy"
+	"github.com/aran/mdns-caddy/internal/html"
+	"github.com/aran/mdns-caddy/internal/mdns"
+	"github.com/aran/mdns-caddy/internal/profile"
 )
 
 func main() {

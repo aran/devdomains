@@ -1,4 +1,3 @@
-// Package network provides networking utilities for the application
 package network
 
 import (
@@ -7,7 +6,6 @@ import (
 	"net"
 )
 
-// GetLocalIPs returns a slice of local non-loopback IPv4 and IPv6 addresses
 func GetLocalIPs() ([]net.IP, error) {
 	var ips []net.IP
 
@@ -17,7 +15,6 @@ func GetLocalIPs() ([]net.IP, error) {
 	}
 
 	for _, iface := range interfaces {
-		// Skip loopback and non-up interfaces
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
@@ -33,12 +30,9 @@ func GetLocalIPs() ([]net.IP, error) {
 			case *net.IPNet:
 				ip := v.IP
 				if !ip.IsLoopback() {
-					// For IPv4 addresses, To4() returns a 4-byte representation
-					// For IPv6 addresses, To4() returns nil and we use the original address
 					if ipv4 := ip.To4(); ipv4 != nil {
 						ips = append(ips, ipv4)
 					} else if ip.To16() != nil {
-						// Native IPv6 address (already filtered loopback above)
 						ips = append(ips, ip)
 					}
 				}

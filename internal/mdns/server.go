@@ -1,4 +1,3 @@
-// Package mdns provides utilities for mDNS server configuration and management
 package mdns
 
 import (
@@ -7,11 +6,10 @@ import (
 	"net"
 	"os"
 
-	"github.com/aran/mdns-caddy/pkg/network"
+	"github.com/aran/mdns-caddy/internal/network"
 	"github.com/hashicorp/mdns"
 )
 
-// ServiceConfig contains configuration for mDNS service advertising
 type ServiceConfig struct {
 	Name     string // Instance name
 	Type     string // Service type
@@ -20,7 +18,6 @@ type ServiceConfig struct {
 	Port     int    // Port
 }
 
-// DefaultServiceConfig provides default values for mDNS service configuration
 var DefaultServiceConfig = ServiceConfig{
 	Name:     "back",
 	Type:     "_http._tcp",
@@ -28,9 +25,7 @@ var DefaultServiceConfig = ServiceConfig{
 	Hostname: "back.local.",
 }
 
-// SetupServer configures and starts an mDNS server with the given configuration
 func SetupServer(config ServiceConfig) (*mdns.Server, error) {
-	// Get local IP addresses
 	ips, err := network.GetLocalIPs()
 	if err != nil {
 		return nil, fmt.Errorf("error getting local IPs: %w", err)
@@ -41,7 +36,6 @@ func SetupServer(config ServiceConfig) (*mdns.Server, error) {
 		return nil, fmt.Errorf("error getting hostname: %w", err)
 	}
 
-	// Create an HTTP service for service discovery
 	service, err := mdns.NewMDNSService(
 		config.Name,          // Instance name
 		config.Type,          // Service type
@@ -55,7 +49,6 @@ func SetupServer(config ServiceConfig) (*mdns.Server, error) {
 		return nil, fmt.Errorf("error creating mDNS service: %w", err)
 	}
 
-	// Create the mDNS server with the HTTP service
 	server, err := mdns.NewServer(&mdns.Config{
 		Zone: service,
 	})
@@ -63,7 +56,6 @@ func SetupServer(config ServiceConfig) (*mdns.Server, error) {
 		return nil, fmt.Errorf("error creating mDNS server: %w", err)
 	}
 
-	// Categorize IPs for better logging
 	var ipv4s, ipv6s []net.IP
 	for _, ip := range ips {
 		if ip.To4() != nil {
@@ -84,9 +76,7 @@ func SetupServer(config ServiceConfig) (*mdns.Server, error) {
 	return server, nil
 }
 
-// GetServiceHostnames returns hostnames for the service in a format suitable for Caddy
 func GetServiceHostnames(config ServiceConfig) []string {
-	// Return only the "back.local" hostname, removing trailing dot if present
 	hostname := config.Hostname
 	if len(hostname) > 0 && hostname[len(hostname)-1] == '.' {
 		hostname = hostname[:len(hostname)-1]

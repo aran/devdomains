@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"text/template"
 	
-	"github.com/aran/mdns-caddy/pkg/cert"
-	"github.com/aran/mdns-caddy/pkg/profile"
+	"github.com/aran/mdns-caddy/internal/cert"
+	"github.com/aran/mdns-caddy/internal/profile"
 )
 
 type Config struct {
@@ -32,53 +32,32 @@ func GenerateConfig(hostnames []string, port int, outputPath string) (bool, bool
 	certManager := cert.NewManager(cwd)
 	profileManager := profile.NewProfileManager(cwd)
 	
-	// Track if certificates and profile were generated
 	certGenerated := false
 	profileGenerated := false
 
-	// Check if Root CA exists
-	rootCAExists := false
 	_, err = os.Stat(certManager.Paths.RootCAPath)
-	if err == nil {
-		rootCAExists = true
+	if err != nil {
+		certGenerated = true
 	}
 
-	// Try to ensure CA exists
 	if err := certManager.EnsureCA(); err != nil {
 		return false, false, fmt.Errorf("error ensuring CA exists: %w", err)
 	}
 
-	// If root CA didn't exist before but exists now, it was generated
-	if !rootCAExists {
+	_, err = os.Stat(certManager.Paths.LeafCertPath)
+	if err != nil {
 		certGenerated = true
 	}
 
-	// Check if leaf certificate exists
-	leafCertExists := false
-	_, err = os.Stat(certManager.Paths.LeafCertPath)
-	if err == nil {
-		leafCertExists = true
-	}
-
-	// Try to ensure leaf certificate exists
 	if err := certManager.EnsureCertificate(hostnames); err != nil {
 		return false, false, fmt.Errorf("error ensuring certificate exists: %w", err)
 	}
 
-	// If leaf cert didn't exist before but exists now, it was generated
-	if !leafCertExists {
-		certGenerated = true
-	}
-
-	// Check if profile exists
-	profileExists := profileManager.ProfileExists()
-
-	// Generate profile if needed
-	if certGenerated || !profileExists {
+	if certGenerated || !profileManager.ProfileExists() {
 		if err := profileManager.GenerateProfile(certManager.Paths.RootCAPath); err != nil {
 			return certGenerated, false, fmt.Errorf("error generating provisioning profile: %w", err)
 		}
-		profileGenerated = !profileExists
+		profileGenerated = !profileManager.ProfileExists()
 	}
 
 	tlsCertPath, err := filepath.Rel(cwd, certManager.Paths.LeafCertPath)
