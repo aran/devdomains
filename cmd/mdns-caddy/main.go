@@ -1,16 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/aran/mdns-caddy/internal/caddy"
 	"github.com/aran/mdns-caddy/internal/dns"
@@ -192,11 +195,98 @@ func run(cfg config) {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
+	
+	// Start Caddy as a subprocess
+	log.Printf("Starting Caddy server for HTTPS and DNS-over-HTTPS...")
+	caddyCmd := exec.Command("caddy", "run")
+	
+	// Create a pipe for Caddy's stdout and stderr
+	caddyStdoutPipe, err := caddyCmd.StdoutPipe()
+	if err != nil {
+		log.Printf("Warning: Failed to create pipe for Caddy output: %v", err)
+	} else {
+		go func() {
+			scanner := bufio.NewScanner(caddyStdoutPipe)
+			for scanner.Scan() {
+				log.Printf("[Caddy] %s", scanner.Text())
+			}
+		}()
+	}
+	
+	caddyStderrPipe, err := caddyCmd.StderrPipe()
+	if err != nil {
+		log.Printf("Warning: Failed to create pipe for Caddy error output: %v", err)
+	} else {
+		go func() {
+			scanner := bufio.NewScanner(caddyStderrPipe)
+			for scanner.Scan() {
+				log.Printf("[Caddy] %s", scanner.Text())
+			}
+		}()
+	}
+	
+	// Variable to track if Caddy is running
+	var caddyRunning bool
+	
+	// Start Caddy
+	if err := caddyCmd.Start(); err != nil {
+		log.Printf("Warning: Failed to start Caddy: %v", err)
+		log.Printf("DNS-over-HTTPS self-test will be skipped")
+	} else {
+		log.Printf("Caddy started successfully (PID: %d)", caddyCmd.Process.Pid)
+		caddyRunning = true
+		
+		// Run the DNS-over-HTTPS self-test after Caddy starts
+		go func() {
+			// Give Caddy a little time to start
+			time.Sleep(2 * time.Second)
+			
+			if !caddyRunning {
+				log.Printf("⚠️ Skipping DNS-over-HTTPS self-test: Caddy is not running")
+				return
+			}
+			
+			testOpts := dns.SelfTestOptions{
+				TargetDomain:   cfg.targetDomain,
+				ServerHostname: strings.TrimSuffix(serviceConfig.Hostname, "."), 
+				ServerPort:     443, // Caddy serves HTTPS on port 443 by default
+				RootCAPath:     filepath.Join(cwd, "certs", "root-ca.crt"),
+			}
+			
+			// Try GET method first
+			err := dns.RunSelfTest(testOpts)
+			if err != nil {
+				log.Printf("⚠️ DNS-over-HTTPS GET self-test failed: %v", err)
+				
+				// If GET failed, try POST method as a fallback
+				err = dns.RunSelfTestPost(testOpts)
+				if err != nil {
+					log.Printf("⚠️ DNS-over-HTTPS POST self-test also failed: %v", err)
+					log.Printf("⚠️ Note: The self-test failure doesn't prevent the server from running")
+					log.Printf("⚠️ DNS resolution might not work correctly until the issue is resolved")
+				}
+			} else {
+				log.Printf("✓ DNS-over-HTTPS self-test passed successfully")
+			}
+		}()
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	<-stop
+	
+	// Stop Caddy gracefully if it's running
+	if caddyCmd.Process != nil {
+		log.Printf("Stopping Caddy server...")
+		if err := caddyCmd.Process.Signal(os.Interrupt); err != nil {
+			log.Printf("Error sending interrupt signal to Caddy: %v", err)
+			// Force kill if interrupt doesn't work
+			if err := caddyCmd.Process.Kill(); err != nil {
+				log.Printf("Error killing Caddy process: %v", err)
+			}
+		}
+	}
 	log.Println("Shutting down servers...")
 
 	if err := server.Shutdown(context.Background()); err != nil {

@@ -104,7 +104,10 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 	// Process each question
 	for _, q := range query.Question {
 		qname := strings.TrimSuffix(q.Name, ".")
-		
+
+		// Log the DNS query
+		log.Printf("DNS Query: type=%s name=%s", dns.TypeToString[q.Qtype], q.Name)
+
 		// Check if this is a request for our target domain or subdomain
 		if qname == targetDomain || strings.HasSuffix(qname, "."+targetDomain) {
 			// Get local machine IPs
@@ -128,6 +131,7 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 							A: ipv4,
 						}
 						response.Answer = append(response.Answer, rr)
+						log.Printf("DNS Response: A record for %s -> %s", q.Name, ipv4.String())
 						break // Only include one answer for simplicity
 					}
 				}
@@ -146,6 +150,7 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 							AAAA: ip,
 						}
 						response.Answer = append(response.Answer, rr)
+						log.Printf("DNS Response: AAAA record for %s -> %s", q.Name, ip.String())
 						break // Only include one answer for simplicity
 					}
 				}
@@ -153,6 +158,7 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 		} else {
 			// For non-target domains, we should refuse to answer
 			// This is important as the profile is configured to only ask us about specific domains
+			log.Printf("DNS Query refused: %s (not in target domain %s)", q.Name, targetDomain)
 			response.Rcode = dns.RcodeRefused
 		}
 	}
