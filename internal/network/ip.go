@@ -6,6 +6,14 @@ import (
 	"net"
 )
 
+// isLinkLocal checks if an IPv4 address is a link-local address (169.254.x.x)
+func isLinkLocal(ip net.IP) bool {
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4[0] == 169 && ip4[1] == 254
+	}
+	return ip.IsLinkLocalUnicast() // For IPv6
+}
+
 func GetLocalIPs() ([]net.IP, error) {
 	var ips []net.IP
 
@@ -29,7 +37,7 @@ func GetLocalIPs() ([]net.IP, error) {
 			switch v := addr.(type) {
 			case *net.IPNet:
 				ip := v.IP
-				if !ip.IsLoopback() {
+				if !ip.IsLoopback() && !isLinkLocal(ip) {
 					if ipv4 := ip.To4(); ipv4 != nil {
 						ips = append(ips, ipv4)
 					} else if ip.To16() != nil {
@@ -41,7 +49,7 @@ func GetLocalIPs() ([]net.IP, error) {
 	}
 
 	if len(ips) == 0 {
-		return nil, fmt.Errorf("no non-loopback IP addresses found")
+		return nil, fmt.Errorf("no usable IP addresses found")
 	}
 
 	return ips, nil

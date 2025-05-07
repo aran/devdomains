@@ -6,12 +6,19 @@ import (
 	"net/http"
 )
 
-type TemplateData struct {
-	Port        int
-	HostAddress string
+type PortMapping struct {
+	ExternalPort int
+	InternalPort int
 }
 
-func IndexHandler(port int) http.HandlerFunc {
+type TemplateData struct {
+	Port         int
+	HostAddress  string
+	TargetDomain string
+	PortMappings []PortMapping
+}
+
+func IndexHandler(port int, targetDomain string, portMappings []PortMapping) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if host == "" {
@@ -19,8 +26,10 @@ func IndexHandler(port int) http.HandlerFunc {
 		}
 
 		data := TemplateData{
-			Port:        port,
-			HostAddress: host,
+			Port:         port,
+			HostAddress:  host,
+			TargetDomain: targetDomain,
+			PortMappings: portMappings,
 		}
 
 		tmpl, err := template.New("index").Parse(indexTemplate)
@@ -60,6 +69,10 @@ const indexTemplate = `<!DOCTYPE html>
             border-bottom: 1px solid #eee;
             padding-bottom: 10px;
         }
+        h2 {
+            color: #2c3e50;
+            margin-top: 30px;
+        }
         .info {
             background-color: #f8f9fa;
             border-left: 4px solid #3498db;
@@ -84,14 +97,52 @@ const indexTemplate = `<!DOCTYPE html>
             border-radius: 3px;
             font-family: monospace;
         }
+        .feature {
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
     <h1>mDNS Caddy Server</h1>
+    
     <div class="info">
-        <p>This server is running on port <code>{{.Port}}</code> and provides support for mDNS discovery and TLS certificate provisioning.</p>
-        <p>If you need to install the TLS certificate on your device, you can access the Apple provisioning profile.</p>
-        <a href="http://{{.HostAddress}}:{{.Port}}/p" class="link">Download TLS Certificate Profile</a>
+        <p>This server is running on port <code>{{.Port}}</code> and provides the following features:</p>
+        <ul>
+            <li>mDNS discovery for local services</li>
+            <li>Self-signed TLS certificates for secure connections</li>
+            <li>DNS over HTTPS for targeted domain resolution</li>
+            <li>Caddy reverse proxy configuration</li>
+        </ul>
+        <a href="/p" class="link">Download Configuration Profile</a>
+    </div>
+    
+    <h2>How it Works</h2>
+    
+    <div class="feature">
+        <h3>1. Install the Configuration Profile</h3>
+        <p>Download and install the configuration profile on your iOS or macOS device. This profile will:</p>
+        <ul>
+            <li>Install the TLS certificate for secure connections</li>
+            <li>Configure DNS over HTTPS to resolve <code>{{.TargetDomain}}</code> to this machine</li>
+            <li>Only affect DNS resolution for <code>{{.TargetDomain}}</code> and its subdomains</li>
+        </ul>
+    </div>
+    
+    <div class="feature">
+        <h3>2. Access Your Local Services</h3>
+        <p>After installing the profile, you can access your local services at:</p>
+        <ul>
+            {{ range .PortMappings }}
+            <li><code>https://{{$.TargetDomain}}:{{.ExternalPort}}</code> - Forwards to <code>localhost:{{.InternalPort}}</code></li>
+            {{ end }}
+        </ul>
+    </div>
+    
+    <div class="feature">
+        <h3>DNS over HTTPS</h3>
+        <p>This server provides a DNS over HTTPS endpoint at:</p>
+        <code>https://{{.HostAddress}}/dns-query</code>
+        <p>The configuration profile will automatically use this for domain resolution.</p>
     </div>
 </body>
 </html>`

@@ -23,7 +23,7 @@ type ProfileManager struct {
 
 func NewProfileManager(baseDir string) *ProfileManager {
 	profileDir := filepath.Join(baseDir, DefaultProfileDir)
-	
+
 	return &ProfileManager{
 		ProfileDir:  profileDir,
 		ProfilePath: filepath.Join(profileDir, ProfileFilename),
@@ -34,7 +34,7 @@ func (p *ProfileManager) EnsureProfileDir() error {
 	return os.MkdirAll(p.ProfileDir, 0755)
 }
 
-func (p *ProfileManager) GenerateProfile(rootCAPath string) error {
+func (p *ProfileManager) GenerateProfile(rootCAPath, mdnsHostname, targetDomain string) error {
 	rootCACertData, err := os.ReadFile(rootCAPath)
 	if err != nil {
 		return fmt.Errorf("error reading root CA certificate: %w", err)
@@ -42,18 +42,29 @@ func (p *ProfileManager) GenerateProfile(rootCAPath string) error {
 
 	rootCABase64 := base64.StdEncoding.EncodeToString(rootCACertData)
 
+	// Remove trailing dot from hostnames if present
+	if len(mdnsHostname) > 0 && mdnsHostname[len(mdnsHostname)-1] == '.' {
+		mdnsHostname = mdnsHostname[:len(mdnsHostname)-1]
+	}
+
 	profileData := struct {
-		RootCertBase64     string
-		MainUUID           string
-		RootCertUUID       string
+		RootCertBase64       string
+		MainUUID             string
+		RootCertUUID         string
 		IntermediateCertUUID string
-		Timestamp          string
+		DNSPayloadUUID       string
+		MDNSHostname         string
+		TargetDomain         string
+		Timestamp            string
 	}{
-		RootCertBase64:     rootCABase64,
-		MainUUID:           uuid.New().String(),
-		RootCertUUID:       uuid.New().String(),
+		RootCertBase64:       rootCABase64,
+		MainUUID:             uuid.New().String(),
+		RootCertUUID:         uuid.New().String(),
 		IntermediateCertUUID: uuid.New().String(),
-		Timestamp:          time.Now().Format(time.RFC3339),
+		DNSPayloadUUID:       uuid.New().String(),
+		MDNSHostname:         mdnsHostname,
+		TargetDomain:         targetDomain,
+		Timestamp:            time.Now().Format(time.RFC3339),
 	}
 
 	tmpl, err := template.New("profile").Parse(profileTemplate)
@@ -82,6 +93,7 @@ func (p *ProfileManager) ProfileExists() bool {
 	_, err := os.Stat(p.ProfilePath)
 	return err == nil
 }
+
 const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -92,13 +104,13 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <key>PayloadVersion</key>
     <integer>1</integer>
     <key>PayloadIdentifier</key>
-    <string>com.mdns-caddy.tls.certificates</string>
+    <string>com.mdns-caddy.configuration</string>
     <key>PayloadUUID</key>
     <string>{{.MainUUID}}</string>
     <key>PayloadDisplayName</key>
-    <string>mDNS Caddy TLS Certificate Trust</string>
+    <string>mDNS Caddy Configuration</string>
     <key>PayloadDescription</key>
-    <string>This profile installs TLS certificates so your device can trust your local mDNS Caddy resources.</string>
+    <string>This profile configures your device to trust local TLS certificates and resolve {{.TargetDomain}} through your local DNS-over-HTTPS server.</string>
     <key>PayloadContent</key>
     <array>
         <!-- Root Certificate Payload -->
@@ -119,6 +131,34 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
             <data>
                 {{.RootCertBase64}}
             </data>
+        </dict>
+
+        <!-- DNS Settings Payload -->
+        <dict>
+            <key>PayloadType</key>
+            <string>com.apple.dnsSettings.managed</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+            <key>PayloadIdentifier</key>
+            <string>com.mdns-caddy.dns</string>
+            <key>PayloadUUID</key>
+            <string>{{.DNSPayloadUUID}}</string>
+            <key>PayloadDisplayName</key>
+            <string>DNS Settings for {{.TargetDomain}}</string>
+            <key>PayloadDescription</key>
+            <string>Configures DNS over HTTPS to resolve {{.TargetDomain}} to your local machine</string>
+            <key>DNSSettings</key>
+            <dict>
+                <key>DNSProtocol</key>
+                <string>HTTPS</string>
+                <key>ServerURL</key>
+                <string>https://{{.MDNSHostname}}/dns-query</string>
+                <key>SupplementalMatchDomains</key>
+                <array>
+                    <string>{{.TargetDomain}}</string>
+                </array>
+            </dict>
+            <!-- This configuration ensures all DNS queries for the target domain are reliably handled by the local server -->
         </dict>
     </array>
 </dict>

@@ -24,10 +24,12 @@ const (
 )
 
 type CertPaths struct {
-	RootCAPath   string
-	RootKeyPath  string
-	LeafCertPath string
-	LeafKeyPath  string
+	RootCAPath      string
+	RootKeyPath     string
+	LocalCertPath   string
+	LocalKeyPath    string
+	TargetCertPath  string
+	TargetKeyPath   string
 }
 
 type Manager struct {
@@ -41,10 +43,12 @@ func NewManager(baseDir string) *Manager {
 	return &Manager{
 		CertDir: certDir,
 		Paths: CertPaths{
-			RootCAPath:   filepath.Join(certDir, "root-ca.crt"),
-			RootKeyPath:  filepath.Join(certDir, "root-ca.key"),
-			LeafCertPath: filepath.Join(certDir, "leaf.crt"),
-			LeafKeyPath:  filepath.Join(certDir, "leaf.key"),
+			RootCAPath:     filepath.Join(certDir, "root-ca.crt"),
+			RootKeyPath:    filepath.Join(certDir, "root-ca.key"),
+			LocalCertPath:  filepath.Join(certDir, "local.crt"),
+			LocalKeyPath:   filepath.Join(certDir, "local.key"),
+			TargetCertPath: filepath.Join(certDir, "target.crt"),
+			TargetKeyPath:  filepath.Join(certDir, "target.key"),
 		},
 	}
 }
@@ -110,19 +114,31 @@ func (m *Manager) EnsureCA() error {
 	return nil
 }
 
-func (m *Manager) EnsureCertificate(hostnames []string) error {
+func (m *Manager) EnsureLocalCertificate(hostnames []string) error {
 	if len(hostnames) == 0 {
-		return fmt.Errorf("no hostnames provided")
+		return fmt.Errorf("no hostnames provided for local certificate")
 	}
 
-	if _, err := os.Stat(m.Paths.LeafCertPath); err == nil {
+	if _, err := os.Stat(m.Paths.LocalCertPath); err == nil {
 		return nil
 	}
 
-	return m.GenerateCertificate(hostnames)
+	return m.GenerateCertificate(hostnames, m.Paths.LocalCertPath, m.Paths.LocalKeyPath)
 }
 
-func (m *Manager) GenerateCertificate(hostnames []string) error {
+func (m *Manager) EnsureTargetCertificate(hostnames []string) error {
+	if len(hostnames) == 0 {
+		return fmt.Errorf("no hostnames provided for target certificate")
+	}
+
+	if _, err := os.Stat(m.Paths.TargetCertPath); err == nil {
+		return nil
+	}
+
+	return m.GenerateCertificate(hostnames, m.Paths.TargetCertPath, m.Paths.TargetKeyPath)
+}
+
+func (m *Manager) GenerateCertificate(hostnames []string, certPath string, keyPath string) error {
 	if len(hostnames) == 0 {
 		return fmt.Errorf("no hostnames provided")
 	}
@@ -192,11 +208,11 @@ func (m *Manager) GenerateCertificate(hostnames []string) error {
 		return fmt.Errorf("error parsing leaf certificate: %w", err)
 	}
 
-	if err := saveCertificate(m.Paths.LeafCertPath, leafCert); err != nil {
+	if err := saveCertificate(certPath, leafCert); err != nil {
 		return fmt.Errorf("error saving leaf certificate: %w", err)
 	}
 
-	_, err = pemutil.Serialize(priv, pemutil.ToFile(m.Paths.LeafKeyPath, 0600))
+	_, err = pemutil.Serialize(priv, pemutil.ToFile(keyPath, 0600))
 	if err != nil {
 		return fmt.Errorf("error saving leaf key: %w", err)
 	}
