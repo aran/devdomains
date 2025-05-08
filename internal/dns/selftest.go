@@ -159,6 +159,113 @@ func RunSelfTest(opts SelfTestOptions) error {
 	log.Printf("Received %d answers with IP(s): %s", 
 		len(response.Answer), strings.Join(ips, ", "))
 	
+	// Also test with an unsupported query type
+	RunSelfTestUnsupportedType(opts)
+	
+	return nil
+}
+
+// RunSelfTestUnsupportedType tests that the server correctly handles unsupported DNS record types
+func RunSelfTestUnsupportedType(opts SelfTestOptions) error {
+	if opts.TargetDomain == "" || opts.ServerHostname == "" || opts.ServerPort == 0 {
+		return fmt.Errorf("missing required options for unsupported type self-test")
+	}
+	
+	// Log that we're starting a self-test for an unsupported record type
+	log.Printf("Running DNS-over-HTTPS self-test for unsupported record type on domain: %s", opts.TargetDomain)
+	
+	// Ensure the domain ends with a dot as required by DNS
+	queryDomain := opts.TargetDomain
+	if !strings.HasSuffix(queryDomain, ".") {
+		queryDomain = queryDomain + "."
+	}
+	
+	// Create a DNS message with a TXT record query (which we don't support)
+	m := new(dns.Msg)
+	m.Id = dns.Id()
+	m.RecursionDesired = true
+	m.Question = []dns.Question{
+		{Name: queryDomain, Qtype: dns.TypeTXT, Qclass: dns.ClassINET},
+	}
+	
+	// Pack the DNS message
+	buf, err := m.Pack()
+	if err != nil {
+		return fmt.Errorf("failed to pack DNS message for unsupported type test: %w", err)
+	}
+	
+	// Construct the request URL
+	requestURL := fmt.Sprintf("https://%s:%d/dns-query", 
+		opts.ServerHostname, opts.ServerPort)
+	
+	// Setup a TLS config that trusts our local root CA
+	tlsConfig, err := createTLSConfig(opts.RootCAPath)
+	if err != nil {
+		return fmt.Errorf("failed to create TLS config for unsupported type test: %w", err)
+	}
+	
+	// Create an HTTP client with our TLS config
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+	
+	// Make the request
+	req, err := http.NewRequest("POST", requestURL, bytes.NewReader(buf))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request for unsupported type test: %w", err)
+	}
+	
+	req.Header.Set("Content-Type", "application/dns-message")
+	req.Header.Set("Accept", "application/dns-message")
+	
+	// Execute the request
+	startTime := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("DNS-over-HTTPS request for unsupported type failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	duration := time.Since(startTime)
+	
+	// Check if the response was successful
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("DNS-over-HTTPS request for unsupported type returned non-OK status: %d", 
+			resp.StatusCode)
+	}
+	
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read DNS-over-HTTPS response for unsupported type: %w", err)
+	}
+	
+	// Parse the DNS response
+	response := new(dns.Msg)
+	if err := response.Unpack(body); err != nil {
+		return fmt.Errorf("failed to unpack DNS response for unsupported type: %w", err)
+	}
+	
+	// For unsupported types, we expect NOERROR with empty answer section
+	if response.Rcode != dns.RcodeSuccess {
+		return fmt.Errorf("DNS query for unsupported type returned wrong code: %s (expected NOERROR)", 
+			dns.RcodeToString[response.Rcode])
+	}
+	
+	// Verify empty answer section
+	if len(response.Answer) > 0 {
+		return fmt.Errorf("DNS query for unsupported type unexpectedly returned %d answers", 
+			len(response.Answer))
+	}
+	
+	// Log success result
+	log.Printf("Self-test SUCCESS: Unsupported record type (TXT) query for %s completed in %.2fms", 
+		opts.TargetDomain, float64(duration.Microseconds())/1000.0)
+	log.Printf("Correctly received NOERROR with empty answer section")
+	
 	return nil
 }
 

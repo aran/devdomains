@@ -116,6 +116,9 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 				return nil, fmt.Errorf("error getting local IPs: %w", err)
 			}
 
+			// Keep track of whether we handled this query type
+			handled := false
+
 			switch q.Qtype {
 			case dns.TypeA:
 				// Find an IPv4 address to return
@@ -132,6 +135,7 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 						}
 						response.Answer = append(response.Answer, rr)
 						log.Printf("DNS Response: A record for %s -> %s", q.Name, ipv4.String())
+						handled = true
 						break // Only include one answer for simplicity
 					}
 				}
@@ -151,9 +155,21 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 						}
 						response.Answer = append(response.Answer, rr)
 						log.Printf("DNS Response: AAAA record for %s -> %s", q.Name, ip.String())
+						handled = true
 						break // Only include one answer for simplicity
 					}
 				}
+			default:
+				// For unsupported record types, we return NOERROR with empty answer section
+				// This is the correct behavior according to RFC 1035 for authoritative servers
+				log.Printf("DNS Query for unsupported type %s (code %d) for %s", 
+					dns.TypeToString[q.Qtype], q.Qtype, q.Name)
+				// response.Rcode is already NOERROR (0) by default
+			}
+			
+			if !handled {
+				log.Printf("DNS Response: NOERROR with empty answer for %s type %s", 
+					q.Name, dns.TypeToString[q.Qtype])
 			}
 		} else {
 			// For non-target domains, we should refuse to answer
