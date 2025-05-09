@@ -23,19 +23,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type config struct {
-	serverPort    int                 // Port for the HTTP server itself
-	targetDomain  string              // Domain to forward to local services
-	portMappings  []caddy.PortMapping // Port mappings (external:internal)
+// DomainPortMapping represents a mapping from external port to internal port for a domain
+type DomainPortMapping struct {
+	ExternalPort int // The port Caddy listens on
+	InternalPort int // The port on localhost to forward to
+}
+
+// DomainMapping represents a domain with its port mappings
+type DomainMapping struct {
+	Domain       string              // Domain name (e.g., dev.example.com)
+	PortMappings []DomainPortMapping // Port mappings for this domain
+}
+
+// Config holds the application configuration
+type Config struct {
+	ServerPort     int             // Port for the HTTP server itself
+	DomainMappings []DomainMapping // Domain mappings
 }
 
 func main() {
-	var portMappingStrings []string
-	
-	cfg := config{
-		serverPort: 9999,
-		// Default to forward port 18888 to 8888
-		portMappings: []caddy.PortMapping{{ExternalPort: 18888, InternalPort: 8888}},
+	var domainMappingStrings []string
+
+	cfg := Config{
+		ServerPort: 9999,
+		// No default domain mappings, these will come from the --domain flag
 	}
 
 	rootCmd := &cobra.Command{
@@ -44,61 +55,82 @@ func main() {
 		Long: `mDNS Caddy advertises a local service via mDNS, provides a self-signed certificate,
 serves DNS over HTTPS, and configures Caddy to proxy requests to your local services.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if cfg.targetDomain == "" {
-				log.Fatalf("Error: --target-domain is required")
+			if len(domainMappingStrings) == 0 {
+				log.Fatalf("Error: At least one --domain mapping is required")
 				return
 			}
-			
-			// Parse port mappings from command line
-			cfg.portMappings = []caddy.PortMapping{}
-			for _, mapping := range portMappingStrings {
-				parts := strings.Split(mapping, ":")
-				if len(parts) != 2 {
-					log.Fatalf("Invalid port mapping format: %s. Use externalPort:internalPort", mapping)
+
+			// Parse domain mappings from command line
+			cfg.DomainMappings = []DomainMapping{}
+			domainMap := make(map[string][]DomainPortMapping)
+
+			for _, domainMapping := range domainMappingStrings {
+				// Split domain from port mappings
+				firstColonIndex := strings.Index(domainMapping, ":")
+				if firstColonIndex == -1 {
+					log.Fatalf("Invalid domain mapping format: %s. Use domain:externalPort:internalPort[,...]", domainMapping)
 					return
 				}
 				
-				externalPort, err := strconv.Atoi(parts[0])
-				if err != nil {
-					log.Fatalf("Invalid external port: %s", parts[0])
-					return
-				}
+				domain := domainMapping[:firstColonIndex]
+				portMappingsStr := domainMapping[firstColonIndex+1:]
 				
-				internalPort, err := strconv.Atoi(parts[1])
-				if err != nil {
-					log.Fatalf("Invalid internal port: %s", parts[1])
-					return
+				// Split multiple port mappings by comma
+				portPairSpecs := strings.Split(portMappingsStr, ",")
+				for _, portPairSpec := range portPairSpecs {
+					// Split each port mapping by colon
+					portParts := strings.Split(portPairSpec, ":")
+					if len(portParts) != 2 {
+						log.Fatalf("Invalid port mapping format: %s. Use externalPort:internalPort", portPairSpec)
+						return
+					}
+					
+					externalPort, err := strconv.Atoi(portParts[0])
+					if err != nil {
+						log.Fatalf("Invalid external port: %s", portParts[0])
+						return
+					}
+					
+					internalPort, err := strconv.Atoi(portParts[1])
+					if err != nil {
+						log.Fatalf("Invalid internal port: %s", portParts[1])
+						return
+					}
+					
+					// Add this port mapping to the domain's list
+					domainMap[domain] = append(domainMap[domain], DomainPortMapping{
+						ExternalPort: externalPort,
+						InternalPort: internalPort,
+					})
+					
 				}
-				
-				cfg.portMappings = append(cfg.portMappings, caddy.PortMapping{
-					ExternalPort: externalPort,
-					InternalPort: internalPort,
-				})
-			}
-			
-			// If no port mappings were specified on the command line, use the default
-			if len(cfg.portMappings) == 0 {
-				cfg.portMappings = []caddy.PortMapping{{ExternalPort: 18888, InternalPort: 8888}}
 			}
 
+			// Now convert the map to our slice structure
+			for domain, portMappings := range domainMap {
+				cfg.DomainMappings = append(cfg.DomainMappings, DomainMapping{
+					Domain:       domain,
+					PortMappings: portMappings,
+				})
+			}
 			run(cfg)
 		},
 	}
 
-	rootCmd.Flags().IntVar(&cfg.serverPort, "server-port", cfg.serverPort, "HTTP server port")
-	rootCmd.Flags().StringVar(&cfg.targetDomain, "target-domain", "", "Target domain to proxy (required)")
-	rootCmd.Flags().StringSliceVar(&portMappingStrings, "port-mapping", []string{"18888:8888"}, 
-		"Port mappings in format externalPort:internalPort (e.g., 18888:8888). Caddy will listen on the external port and forward to the internal port. Multiple mappings can be comma-separated.")
-	rootCmd.MarkFlagRequired("target-domain")
+	rootCmd.Flags().IntVar(&cfg.ServerPort, "server-port", cfg.ServerPort, "HTTP server port")
+	rootCmd.Flags().StringArrayVar(&domainMappingStrings, "domain", []string{},
+		"Domain mappings in format domain:externalPort:internalPort[,externalPort:internalPort...] "+
+			"(e.g., dev.example.com:443:8000,18080:8080). Each port mapping consists of an external port (what Caddy listens on) "+
+			"and an internal port (what it forwards to on localhost).")
 
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Error executing command: %v", err)
 	}
 }
 
-func run(cfg config) {
+func run(cfg Config) {
 	server := &http.Server{
-		Addr: fmt.Sprintf(":%d", cfg.serverPort),
+		Addr: fmt.Sprintf(":%d", cfg.ServerPort),
 	}
 
 	cwd, err := os.Getwd()
@@ -108,16 +140,31 @@ func run(cfg config) {
 
 	profileManager := profile.NewProfileManager(cwd)
 
-	// Convert our internal port mappings to the HTML template format
-	var htmlPortMappings []html.PortMapping
-	for _, mapping := range cfg.portMappings {
-		htmlPortMappings = append(htmlPortMappings, html.PortMapping{
-			ExternalPort: mapping.ExternalPort,
-			InternalPort: mapping.InternalPort,
-		})
+	// Get all domains for HTML and DNS handlers
+	var allDomains []string
+	for _, domainMapping := range cfg.DomainMappings {
+		allDomains = append(allDomains, domainMapping.Domain)
 	}
 
-	http.HandleFunc("/", html.IndexHandler(cfg.serverPort, cfg.targetDomain, htmlPortMappings))
+	// Convert our domain port mappings to the HTML template format
+	var htmlPortMappings []html.PortMapping
+	for _, domainMapping := range cfg.DomainMappings {
+		for _, portMapping := range domainMapping.PortMappings {
+			htmlPortMappings = append(htmlPortMappings, html.PortMapping{
+				Domain:       domainMapping.Domain,
+				ExternalPort: portMapping.ExternalPort,
+				InternalPort: portMapping.InternalPort,
+			})
+		}
+	}
+
+	// The first domain will host the DNS server (consistent with your instruction)
+	var dnsDomain string
+	if len(allDomains) > 0 {
+		dnsDomain = allDomains[0]
+	}
+
+	http.HandleFunc("/", html.IndexHandler(cfg.ServerPort, dnsDomain, htmlPortMappings))
 
 	http.HandleFunc("/p", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(profileManager.ProfilePath); os.IsNotExist(err) {
@@ -130,11 +177,11 @@ func run(cfg config) {
 		http.ServeFile(w, r, profileManager.ProfilePath)
 	})
 
-	// Set up DNS-over-HTTPS handler
-	http.HandleFunc("/dns-query", dns.DoHHandler(cfg.targetDomain))
+	// Set up DNS-over-HTTPS handler for all domains
+	http.HandleFunc("/dns-query", dns.DoHHandlerMulti(allDomains))
 
 	serviceConfig := mdns.DefaultServiceConfig
-	serviceConfig.Port = cfg.serverPort
+	serviceConfig.Port = cfg.ServerPort
 
 	mdnsServer, err := mdns.SetupServer(serviceConfig)
 	if err != nil {
@@ -142,14 +189,30 @@ func run(cfg config) {
 	}
 	defer mdnsServer.Shutdown()
 
-	// Get hostnames for both the mDNS service and the target domain
+	// Get hostnames for the mDNS service
 	mdnsHostnames := mdns.GetServiceHostnames(serviceConfig)
-	allHostnames := append(mdnsHostnames, cfg.targetDomain)
+
+	// Convert our domain mappings to the caddy format
+	var caddyDomainMappings []caddy.DomainMapping
+	for _, domainMapping := range cfg.DomainMappings {
+		var portMappings []caddy.PortMapping
+		for _, pm := range domainMapping.PortMappings {
+			portMappings = append(portMappings, caddy.PortMapping{
+				ExternalPort: pm.ExternalPort,
+				InternalPort: pm.InternalPort,
+			})
+		}
+
+		caddyDomainMappings = append(caddyDomainMappings, caddy.DomainMapping{
+			Domain:       domainMapping.Domain,
+			PortMappings: portMappings,
+		})
+	}
 
 	caddyConfigPath := caddy.DefaultConfigPath
-	
-	// Generate Caddy config with port forwarding for the target domain
-	certGenerated, profileGenerated, err := caddy.GenerateConfig(mdnsHostnames, allHostnames, cfg.serverPort, cfg.portMappings, caddyConfigPath)
+
+	// Generate Caddy config with port forwarding for all domains
+	certGenerated, profileGenerated, err := caddy.GenerateConfig(mdnsHostnames, caddyDomainMappings, cfg.ServerPort, caddyConfigPath)
 	if err != nil {
 		log.Printf("Warning: Failed to generate Caddy configuration: %v", err)
 	} else {
@@ -157,15 +220,15 @@ func run(cfg config) {
 		if err != nil {
 			absPath = caddyConfigPath
 		}
-		
+
 		log.Printf("Caddy configuration generated at: %s", absPath)
-		
+
 		if certGenerated {
 			log.Printf("Self-signed TLS certificates have been generated for HTTPS")
 		} else {
 			log.Printf("Using existing TLS certificates for HTTPS")
 		}
-		
+
 		if profileGenerated {
 			profilePath := filepath.Join(cwd, "profiles", "apple_cert_trust.mobileconfig")
 			absProfilePath, err := filepath.Abs(profilePath)
@@ -174,32 +237,34 @@ func run(cfg config) {
 			}
 			log.Printf("Apple provisioning profile generated at: %s", absProfilePath)
 		}
-		
+
 		log.Printf("🚀 To use Caddy as a reverse proxy, run: caddy run")
-		
-		// Print information about accessing the target domain
-		if len(cfg.portMappings) > 0 {
+
+		// Print information about accessing the target domains
+		if len(cfg.DomainMappings) > 0 {
 			log.Printf("🔗 After installing the profile, access your local services at:")
-			for _, mapping := range cfg.portMappings {
-				log.Printf("   https://%s:%d → localhost:%d", 
-					cfg.targetDomain, mapping.ExternalPort, mapping.InternalPort)
+			for _, domainMapping := range cfg.DomainMappings {
+				for _, mapping := range domainMapping.PortMappings {
+					log.Printf("   https://%s:%d → localhost:%d",
+						domainMapping.Domain, mapping.ExternalPort, mapping.InternalPort)
+				}
 			}
 		}
 	}
 
 	go func() {
 		mdnsHost := strings.TrimSuffix(serviceConfig.Hostname, ".")
-		log.Printf("HTTP server starting on :%d", cfg.serverPort)
-		log.Printf("Access local server at http://%s:%d", mdnsHost, cfg.serverPort)
+		log.Printf("HTTP server starting on :%d", cfg.ServerPort)
+		log.Printf("Access local server at http://%s:%d", mdnsHost, cfg.ServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
-	
+
 	// Start Caddy as a subprocess
 	log.Printf("Starting Caddy server for HTTPS and DNS-over-HTTPS...")
 	caddyCmd := exec.Command("caddy", "run")
-	
+
 	// Create a pipe for Caddy's stdout and stderr
 	caddyStdoutPipe, err := caddyCmd.StdoutPipe()
 	if err != nil {
@@ -212,7 +277,7 @@ func run(cfg config) {
 			}
 		}()
 	}
-	
+
 	caddyStderrPipe, err := caddyCmd.StderrPipe()
 	if err != nil {
 		log.Printf("Warning: Failed to create pipe for Caddy error output: %v", err)
@@ -224,10 +289,10 @@ func run(cfg config) {
 			}
 		}()
 	}
-	
+
 	// Variable to track if Caddy is running
 	var caddyRunning bool
-	
+
 	// Start Caddy
 	if err := caddyCmd.Start(); err != nil {
 		log.Printf("Warning: Failed to start Caddy: %v", err)
@@ -235,38 +300,43 @@ func run(cfg config) {
 	} else {
 		log.Printf("Caddy started successfully (PID: %d)", caddyCmd.Process.Pid)
 		caddyRunning = true
-		
-		// Run the DNS-over-HTTPS self-test after Caddy starts
+
+		// Run DNS-over-HTTPS self-tests after Caddy starts
 		go func() {
 			// Give Caddy a little time to start
 			time.Sleep(2 * time.Second)
-			
+
 			if !caddyRunning {
 				log.Printf("⚠️ Skipping DNS-over-HTTPS self-test: Caddy is not running")
 				return
 			}
-			
-			testOpts := dns.SelfTestOptions{
-				TargetDomain:   cfg.targetDomain,
-				ServerHostname: strings.TrimSuffix(serviceConfig.Hostname, "."), 
-				ServerPort:     443, // Caddy serves HTTPS on port 443 by default
-				RootCAPath:     filepath.Join(cwd, "certs", "root-ca.crt"),
-			}
-			
-			// Try GET method first
-			err := dns.RunSelfTest(testOpts)
-			if err != nil {
-				log.Printf("⚠️ DNS-over-HTTPS GET self-test failed: %v", err)
-				
-				// If GET failed, try POST method as a fallback
-				err = dns.RunSelfTestPost(testOpts)
-				if err != nil {
-					log.Printf("⚠️ DNS-over-HTTPS POST self-test also failed: %v", err)
-					log.Printf("⚠️ Note: The self-test failure doesn't prevent the server from running")
-					log.Printf("⚠️ DNS resolution might not work correctly until the issue is resolved")
+
+			// Run a DNS-over-HTTPS self-test for each domain
+			for _, domain := range allDomains {
+				testOpts := dns.SelfTestOptions{
+					TargetDomain:   domain,
+					ServerHostname: strings.TrimSuffix(serviceConfig.Hostname, "."),
+					ServerPort:     443, // Caddy serves HTTPS on port 443 by default
+					RootCAPath:     filepath.Join(cwd, "certs", "root-ca.crt"),
 				}
-			} else {
-				log.Printf("✓ DNS-over-HTTPS self-test passed successfully")
+
+				log.Printf("Running DNS-over-HTTPS self-test for domain: %s", domain)
+
+				// Try GET method first
+				err := dns.RunSelfTest(testOpts)
+				if err != nil {
+					log.Printf("⚠️ DNS-over-HTTPS GET self-test for %s failed: %v", domain, err)
+
+					// If GET failed, try POST method as a fallback
+					err = dns.RunSelfTestPost(testOpts)
+					if err != nil {
+						log.Printf("⚠️ DNS-over-HTTPS POST self-test for %s also failed: %v", domain, err)
+						log.Printf("⚠️ Note: The self-test failure doesn't prevent the server from running")
+						log.Printf("⚠️ DNS resolution for %s might not work correctly until the issue is resolved", domain)
+					} else {
+						log.Printf("✓ DNS-over-HTTPS POST self-test for %s passed successfully", domain)
+					}
+				}
 			}
 		}()
 	}
@@ -275,7 +345,7 @@ func run(cfg config) {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	<-stop
-	
+
 	// Stop Caddy gracefully if it's running
 	if caddyCmd.Process != nil {
 		log.Printf("Stopping Caddy server...")

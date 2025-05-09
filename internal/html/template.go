@@ -7,6 +7,7 @@ import (
 )
 
 type PortMapping struct {
+	Domain       string
 	ExternalPort int
 	InternalPort int
 }
@@ -123,8 +124,8 @@ const indexTemplate = `<!DOCTYPE html>
         <p>Download and install the configuration profile on your iOS or macOS device. This profile will:</p>
         <ul>
             <li>Install the TLS certificate for secure connections</li>
-            <li>Configure DNS over HTTPS to resolve <code>{{.TargetDomain}}</code> to this machine</li>
-            <li>Only affect DNS resolution for <code>{{.TargetDomain}}</code> and its subdomains</li>
+            <li>Configure DNS over HTTPS to resolve configured domains to this machine</li>
+            <li>Only affect DNS resolution for the domains you've configured and their subdomains</li>
         </ul>
     </div>
     
@@ -133,7 +134,7 @@ const indexTemplate = `<!DOCTYPE html>
         <p>After installing the profile, you can access your local services at:</p>
         <ul>
             {{ range .PortMappings }}
-            <li><code>https://{{$.TargetDomain}}:{{.ExternalPort}}</code> - Forwards to <code>localhost:{{.InternalPort}}</code></li>
+            <li><code>https://{{.Domain}}:{{.ExternalPort}}</code> - Forwards to <code>localhost:{{.InternalPort}}</code></li>
             {{ end }}
         </ul>
     </div>

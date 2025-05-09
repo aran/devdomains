@@ -12,9 +12,15 @@ import (
 	"github.com/miekg/dns"
 )
 
-// DoHHandler creates an HTTP handler for DNS-over-HTTPS requests
+// DoHHandler creates an HTTP handler for DNS-over-HTTPS requests for a single domain
 // targetDomain is the domain to resolve to the local IP
 func DoHHandler(targetDomain string) http.HandlerFunc {
+	return DoHHandlerMulti([]string{targetDomain})
+}
+
+// DoHHandlerMulti creates an HTTP handler for DNS-over-HTTPS requests for multiple domains
+// targetDomains is a list of domains to resolve to the local IP
+func DoHHandlerMulti(targetDomains []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -75,7 +81,7 @@ func DoHHandler(targetDomain string) http.HandlerFunc {
 		}
 
 		// Get response message
-		resp, err := handleDNSQuery(msg, targetDomain)
+		resp, err := handleDNSQueryMulti(msg, targetDomains)
 		if err != nil {
 			log.Printf("Error handling DNS query: %v", err)
 			http.Error(w, "DNS resolution error", http.StatusInternalServerError)
@@ -95,8 +101,8 @@ func DoHHandler(targetDomain string) http.HandlerFunc {
 	}
 }
 
-// handleDNSQuery processes DNS queries and returns the appropriate response
-func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
+// handleDNSQueryMulti processes DNS queries for multiple domains and returns the appropriate response
+func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, error) {
 	response := new(dns.Msg)
 	response.SetReply(query)
 	response.Authoritative = true
@@ -108,8 +114,16 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 		// Log the DNS query
 		log.Printf("DNS Query: type=%s name=%s", dns.TypeToString[q.Qtype], q.Name)
 
-		// Check if this is a request for our target domain or subdomain
-		if qname == targetDomain || strings.HasSuffix(qname, "."+targetDomain) {
+		// Check if this is a request for one of our target domains or their subdomains
+		matchedDomain := ""
+		for _, domain := range targetDomains {
+			if qname == domain || strings.HasSuffix(qname, "."+domain) {
+				matchedDomain = domain
+				break
+			}
+		}
+
+		if matchedDomain != "" {
 			// Get local machine IPs
 			ips, err := network.GetLocalIPs()
 			if err != nil {
@@ -174,10 +188,15 @@ func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
 		} else {
 			// For non-target domains, we should refuse to answer
 			// This is important as the profile is configured to only ask us about specific domains
-			log.Printf("DNS Query refused: %s (not in target domain %s)", q.Name, targetDomain)
+			log.Printf("DNS Query refused: %s (not in target domains)", q.Name)
 			response.Rcode = dns.RcodeRefused
 		}
 	}
 
 	return response, nil
+}
+
+// handleDNSQuery processes DNS queries for a single domain - maintained for backward compatibility
+func handleDNSQuery(query *dns.Msg, targetDomain string) (*dns.Msg, error) {
+	return handleDNSQueryMulti(query, []string{targetDomain})
 }

@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"go.step.sm/crypto/keyutil"
@@ -28,13 +29,17 @@ type CertPaths struct {
 	RootKeyPath     string
 	LocalCertPath   string
 	LocalKeyPath    string
-	TargetCertPath  string
-	TargetKeyPath   string
+	// Remove TargetCertPath and TargetKeyPath, now using domain-specific certs
 }
 
 type Manager struct {
 	CertDir string
 	Paths   CertPaths
+	// Map to keep track of domain certificate paths
+	DomainCertPaths map[string]struct {
+		CertPath string
+		KeyPath  string
+	}
 }
 
 func NewManager(baseDir string) *Manager {
@@ -43,14 +48,32 @@ func NewManager(baseDir string) *Manager {
 	return &Manager{
 		CertDir: certDir,
 		Paths: CertPaths{
-			RootCAPath:     filepath.Join(certDir, "root-ca.crt"),
-			RootKeyPath:    filepath.Join(certDir, "root-ca.key"),
-			LocalCertPath:  filepath.Join(certDir, "local.crt"),
-			LocalKeyPath:   filepath.Join(certDir, "local.key"),
-			TargetCertPath: filepath.Join(certDir, "target.crt"),
-			TargetKeyPath:  filepath.Join(certDir, "target.key"),
+			RootCAPath:    filepath.Join(certDir, "root-ca.crt"),
+			RootKeyPath:   filepath.Join(certDir, "root-ca.key"),
+			LocalCertPath: filepath.Join(certDir, "local.crt"),
+			LocalKeyPath:  filepath.Join(certDir, "local.key"),
 		},
+		DomainCertPaths: make(map[string]struct {
+			CertPath string
+			KeyPath  string
+		}),
 	}
+}
+
+// GetDomainCertPaths returns the certificate paths for a specific domain
+func (m *Manager) GetDomainCertPaths(domain string) (certPath, keyPath string) {
+	// Sanitize domain name for file paths (replace dots with underscores)
+	sanitizedDomain := strings.ReplaceAll(domain, ".", "_")
+	
+	paths, exists := m.DomainCertPaths[domain]
+	if !exists {
+		// Create new paths for this domain
+		paths.CertPath = filepath.Join(m.CertDir, fmt.Sprintf("%s.crt", sanitizedDomain))
+		paths.KeyPath = filepath.Join(m.CertDir, fmt.Sprintf("%s.key", sanitizedDomain))
+		m.DomainCertPaths[domain] = paths
+	}
+	
+	return paths.CertPath, paths.KeyPath
 }
 
 func (m *Manager) EnsureCA() error {
@@ -114,28 +137,63 @@ func (m *Manager) EnsureCA() error {
 	return nil
 }
 
-func (m *Manager) EnsureLocalCertificate(hostnames []string) error {
+func (m *Manager) EnsureLocalCertificate(hostnames []string) (bool, error) {
 	if len(hostnames) == 0 {
-		return fmt.Errorf("no hostnames provided for local certificate")
+		return false, fmt.Errorf("no hostnames provided for local certificate")
 	}
 
-	if _, err := os.Stat(m.Paths.LocalCertPath); err == nil {
-		return nil
+	// Check if both certificate and key exist
+	certExists := true
+	keyExists := true
+	
+	if _, err := os.Stat(m.Paths.LocalCertPath); err != nil {
+		certExists = false
+	}
+	
+	if _, err := os.Stat(m.Paths.LocalKeyPath); err != nil {
+		keyExists = false
+	}
+	
+	// Only return if both files exist
+	if certExists && keyExists {
+		return false, nil
 	}
 
-	return m.GenerateCertificate(hostnames, m.Paths.LocalCertPath, m.Paths.LocalKeyPath)
+	// Generate both certificate and key if either is missing
+	err := m.GenerateCertificate(hostnames, m.Paths.LocalCertPath, m.Paths.LocalKeyPath)
+	return true, err
 }
 
-func (m *Manager) EnsureTargetCertificate(hostnames []string) error {
-	if len(hostnames) == 0 {
-		return fmt.Errorf("no hostnames provided for target certificate")
+// EnsureDomainCertificate ensures both certificate and key exist for a specific domain.
+// Returns whether a certificate was generated (true) or it already existed (false),
+// along with any error that occurred.
+func (m *Manager) EnsureDomainCertificate(domain string) (bool, error) {
+	if domain == "" {
+		return false, fmt.Errorf("no domain provided")
 	}
 
-	if _, err := os.Stat(m.Paths.TargetCertPath); err == nil {
-		return nil
+	certPath, keyPath := m.GetDomainCertPaths(domain)
+	
+	// Check if both certificate and key exist
+	certExists := true
+	keyExists := true
+	
+	if _, err := os.Stat(certPath); err != nil {
+		certExists = false
 	}
-
-	return m.GenerateCertificate(hostnames, m.Paths.TargetCertPath, m.Paths.TargetKeyPath)
+	
+	if _, err := os.Stat(keyPath); err != nil {
+		keyExists = false
+	}
+	
+	// Only return without generation if both files exist
+	if certExists && keyExists {
+		return false, nil
+	}
+	
+	// Generate both certificate and key if either is missing
+	err := m.GenerateCertificate([]string{domain}, certPath, keyPath)
+	return true, err
 }
 
 func (m *Manager) GenerateCertificate(hostnames []string, certPath string, keyPath string) error {

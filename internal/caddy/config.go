@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
-	
+
 	"github.com/aran/mdns-caddy/internal/cert"
 	"github.com/aran/mdns-caddy/internal/profile"
 )
@@ -16,28 +16,39 @@ type PortMapping struct {
 	InternalPort int // The port on localhost to forward to
 }
 
+// DomainMapping represents a domain with its port mappings
+type DomainMapping struct {
+	Domain       string        // Domain name (e.g., dev.example.com)
+	PortMappings []PortMapping // Port mappings for this domain
+}
+
+// CaddyDomainConfig holds domain-specific configuration for the Caddy template
+type CaddyDomainConfig struct {
+	Domain       string
+	CertPath     string
+	KeyPath      string
+	PortMappings []PortMapping
+}
+
+// Config holds the data for the Caddy template
 type Config struct {
-	MDNSHostnames      []string      // Hostnames for mDNS service (back.local)
-	TargetHostnames    []string      // Target domain hostnames (dev.getplans.io)
-	ServerPort         int           // HTTP server port
-	PortMappings       []PortMapping // Port mappings (external:internal)
-	LocalTLSCertPath   string        // Path to local TLS certificate
-	LocalTLSKeyPath    string        // Path to local TLS key
-	TargetTLSCertPath  string        // Path to target TLS certificate
-	TargetTLSKeyPath   string        // Path to target TLS key
+	MDNSHostnames    []string
+	ServerPort       int
+	LocalTLSCertPath string
+	LocalTLSKeyPath  string
+	DomainConfigs    []CaddyDomainConfig
 }
 
 const DefaultConfigPath = "Caddyfile"
 
 func GenerateConfig(
-	mdnsHostnames []string, 
-	allHostnames []string, 
-	serverPort int, 
-	portMappings []PortMapping, 
+	mdnsHostnames []string,
+	domainMappings []DomainMapping,
+	serverPort int,
 	outputPath string,
-) (bool, bool, error) {
-	if len(allHostnames) == 0 {
-		return false, false, fmt.Errorf("no hostnames provided for Caddy configuration")
+) (certGenerated bool, profileGenerated bool, err error) {
+	if len(domainMappings) == 0 {
+		return false, false, fmt.Errorf("no domains provided for Caddy configuration")
 	}
 
 	cwd, err := os.Getwd()
@@ -47,77 +58,87 @@ func GenerateConfig(
 
 	certManager := cert.NewManager(cwd)
 	profileManager := profile.NewProfileManager(cwd)
-	
-	certGenerated := false
-	profileGenerated := false
 
+	// Check if root CA exists
 	_, err = os.Stat(certManager.Paths.RootCAPath)
 	if err != nil {
 		certGenerated = true
 	}
 
+	// Ensure the root CA exists
 	if err := certManager.EnsureCA(); err != nil {
 		return false, false, fmt.Errorf("error ensuring CA exists: %w", err)
 	}
 
-	// Check if either local or target certificates exist
-	_, localCertErr := os.Stat(certManager.Paths.LocalCertPath)
-	_, targetCertErr := os.Stat(certManager.Paths.TargetCertPath)
-	if localCertErr != nil || targetCertErr != nil {
+	// Generate certificate for mDNS hostnames
+	localCertGenerated, err := certManager.EnsureLocalCertificate(mdnsHostnames)
+	if err != nil {
+		return false, false, fmt.Errorf("error ensuring local certificate exists: %w", err)
+	}
+
+	if localCertGenerated {
 		certGenerated = true
 	}
 
-	// Generate separate certificates for local (.local) and target domains
-	if err := certManager.EnsureLocalCertificate(mdnsHostnames); err != nil {
-		return false, false, fmt.Errorf("error ensuring local certificate exists: %w", err)
-	}
-	
-	// Extract target hostnames (everything except mDNS hostnames)
-	var targetHostnames []string
-	for _, h := range allHostnames {
-		isMDNSHostname := false
-		for _, mdnsHost := range mdnsHostnames {
-			if h == mdnsHost {
-				isMDNSHostname = true
-				break
-			}
-		}
-		if !isMDNSHostname {
-			targetHostnames = append(targetHostnames, h)
-		}
-	}
-	
-	// Generate certificate for target domains
-	if err := certManager.EnsureTargetCertificate(targetHostnames); err != nil {
-		return false, false, fmt.Errorf("error ensuring target certificate exists: %w", err)
+	// Extract all domains from the domain mappings
+	var allDomains []string
+	for _, mapping := range domainMappings {
+		allDomains = append(allDomains, mapping.Domain)
 	}
 
+	// Generate domain-specific certificates
+	for _, domain := range allDomains {
+		domainCertGenerated, err := certManager.EnsureDomainCertificate(domain)
+		if err != nil {
+			return false, false, fmt.Errorf("error ensuring certificate for %s: %w", domain, err)
+		}
+
+		if domainCertGenerated {
+			certGenerated = true
+		}
+	}
+
+	// Generate provisioning profile for all domains
 	if certGenerated || !profileManager.ProfileExists() {
-		// Update to pass target hostnames to the profile generator
-		if err := profileManager.GenerateProfile(certManager.Paths.RootCAPath, mdnsHostnames[0], targetHostnames[0]); err != nil {
+		if err := profileManager.GenerateProfile(certManager.Paths.RootCAPath, mdnsHostnames[0], allDomains); err != nil {
 			return certGenerated, false, fmt.Errorf("error generating provisioning profile: %w", err)
 		}
 		profileGenerated = !profileManager.ProfileExists()
 	}
 
+	// Get relative path for local TLS certificate and key
 	localTLSCertPath, err := filepath.Rel(cwd, certManager.Paths.LocalCertPath)
 	if err != nil {
 		return certGenerated, profileGenerated, fmt.Errorf("error getting relative path for local certificate: %w", err)
 	}
-	
+
 	localTLSKeyPath, err := filepath.Rel(cwd, certManager.Paths.LocalKeyPath)
 	if err != nil {
 		return certGenerated, profileGenerated, fmt.Errorf("error getting relative path for local key: %w", err)
 	}
-	
-	targetTLSCertPath, err := filepath.Rel(cwd, certManager.Paths.TargetCertPath)
-	if err != nil {
-		return certGenerated, profileGenerated, fmt.Errorf("error getting relative path for target certificate: %w", err)
-	}
-	
-	targetTLSKeyPath, err := filepath.Rel(cwd, certManager.Paths.TargetKeyPath)
-	if err != nil {
-		return certGenerated, profileGenerated, fmt.Errorf("error getting relative path for target key: %w", err)
+
+	// Create domain configurations for the template
+	var domainConfigs []CaddyDomainConfig
+	for _, domainMapping := range domainMappings {
+		certPath, keyPath := certManager.GetDomainCertPaths(domainMapping.Domain)
+
+		// Convert to relative paths
+		relCertPath, err := filepath.Rel(cwd, certPath)
+		if err != nil {
+			return certGenerated, profileGenerated, fmt.Errorf("error getting relative path for domain certificate: %w", err)
+		}
+
+		relKeyPath, err := filepath.Rel(cwd, keyPath)
+		if err != nil {
+			return certGenerated, profileGenerated, fmt.Errorf("error getting relative path for domain key: %w", err)
+		}
+
+		domainConfigs = append(domainConfigs, CaddyDomainConfig{
+			Domain:       domainMapping.Domain,
+			CertPath:     relCertPath,
+			KeyPath:      relKeyPath,
+			PortMappings: domainMapping.PortMappings,
+		})
 	}
 
 	const caddyTemplate = `# This Caddyfile was automatically generated by mdns-caddy
@@ -132,34 +153,34 @@ func GenerateConfig(
 {{ range .MDNSHostnames }}
 {{ . }} {
 	tls {{ $.LocalTLSCertPath }} {{ $.LocalTLSKeyPath }}
-	
+
 	# Handle DNS-over-HTTPS requests
 	handle /dns-query {
 		reverse_proxy localhost:{{ $.ServerPort }}
 	}
-	
+
 	# Handle all other paths
 	handle {
 		reverse_proxy localhost:{{ $.ServerPort }}
 	}
 }
-
 {{ end }}
 
-# Target domain hostnames with specific port mappings
-{{ range .TargetHostnames }}
-{{ $hostname := . }}
+# Target domains with their port mappings
+{{ range .DomainConfigs }}
+{{ $domain := .Domain }}
+{{ $certPath := .CertPath }}
+{{ $keyPath := .KeyPath }}
 
-# Setup server blocks for each port mapping
-{{ range $.PortMappings }}
-{{ $hostname }}:{{ .ExternalPort }} {
-	tls {{ $.TargetTLSCertPath }} {{ $.TargetTLSKeyPath }}
-	
+# Setup server blocks for each port mapping for this domain
+{{ range .PortMappings }}
+{{ $domain }}:{{ .ExternalPort }} {
+	tls {{ $certPath }} {{ $keyPath }}
+
 	# Forward all traffic to the internal port
 	reverse_proxy http://localhost:{{ .InternalPort }}
 }
 {{ end }}
-
 {{ end }}
 `
 	tmpl, err := template.New("caddy").Parse(caddyTemplate)
@@ -179,14 +200,11 @@ func GenerateConfig(
 	defer file.Close()
 
 	config := Config{
-		MDNSHostnames:     mdnsHostnames,
-		TargetHostnames:   targetHostnames,
-		ServerPort:        serverPort,
-		PortMappings:      portMappings,
-		LocalTLSCertPath:  localTLSCertPath,
-		LocalTLSKeyPath:   localTLSKeyPath,
-		TargetTLSCertPath: targetTLSCertPath,
-		TargetTLSKeyPath:  targetTLSKeyPath,
+		MDNSHostnames:    mdnsHostnames,
+		ServerPort:       serverPort,
+		LocalTLSCertPath: localTLSCertPath,
+		LocalTLSKeyPath:  localTLSKeyPath,
+		DomainConfigs:    domainConfigs,
 	}
 	if err := tmpl.Execute(file, config); err != nil {
 		return certGenerated, profileGenerated, fmt.Errorf("error executing Caddy template: %w", err)
