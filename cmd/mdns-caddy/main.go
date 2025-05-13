@@ -71,10 +71,10 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 					log.Fatalf("Invalid domain mapping format: %s. Use domain:externalPort:internalPort[,...]", domainMapping)
 					return
 				}
-				
+
 				domain := domainMapping[:firstColonIndex]
 				portMappingsStr := domainMapping[firstColonIndex+1:]
-				
+
 				// Split multiple port mappings by comma
 				portPairSpecs := strings.Split(portMappingsStr, ",")
 				for _, portPairSpec := range portPairSpecs {
@@ -84,25 +84,25 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 						log.Fatalf("Invalid port mapping format: %s. Use externalPort:internalPort", portPairSpec)
 						return
 					}
-					
+
 					externalPort, err := strconv.Atoi(portParts[0])
 					if err != nil {
 						log.Fatalf("Invalid external port: %s", portParts[0])
 						return
 					}
-					
+
 					internalPort, err := strconv.Atoi(portParts[1])
 					if err != nil {
 						log.Fatalf("Invalid internal port: %s", portParts[1])
 						return
 					}
-					
+
 					// Add this port mapping to the domain's list
 					domainMap[domain] = append(domainMap[domain], DomainPortMapping{
 						ExternalPort: externalPort,
 						InternalPort: internalPort,
 					})
-					
+
 				}
 			}
 
@@ -263,7 +263,7 @@ func run(cfg Config) {
 
 	// Start Caddy as a subprocess
 	log.Printf("Starting Caddy server for HTTPS and DNS-over-HTTPS...")
-	caddyCmd := exec.Command("caddy", "run")
+	caddyCmd := exec.Command("caddy", "run", "--watch")
 
 	// Create a pipe for Caddy's stdout and stderr
 	caddyStdoutPipe, err := caddyCmd.StdoutPipe()
