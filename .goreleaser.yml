@@ -15,6 +15,12 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/aran/devdomains/internal/version.Version={{.Version}}
+      - -X github.com/aran/devdomains/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/aran/devdomains/internal/version.Date={{.Date}}
+      - -X github.com/aran/devdomains/internal/version.BuiltBy=GoReleaser
 
 archives:
   - format: zip

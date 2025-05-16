@@ -20,6 +20,7 @@ import (
 	"github.com/aran/devdomains/internal/html"
 	"github.com/aran/devdomains/internal/mdns"
 	"github.com/aran/devdomains/internal/profile"
+	"github.com/aran/devdomains/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -49,6 +50,7 @@ func main() {
 		ServerPort: 9999,
 		// No default domain mappings, these will come from the --domain flag
 	}
+
 
 	rootCmd := &cobra.Command{
 		Use:   "devdomains",
@@ -123,7 +125,13 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 		"Domain mappings in format domain:externalPort:internalPort[,externalPort:internalPort...] "+
 			"(e.g., dev.example.com:443:8000,18080:8080). Each port mapping consists of an external port (what Caddy listens on) "+
 			"and an internal port (what it forwards to on localhost).")
+	
+	// Set version information for --version flag
+	rootCmd.Version = version.Version
 
+	// Add a custom template for the version command that displays full info
+	rootCmd.SetVersionTemplate(version.Info())
+	
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Error executing command: %v", err)
 	}
