@@ -8,6 +8,30 @@ DevDomains is a local development tool that creates secure HTTPS endpoints for y
 - Creating mobile configuration profiles for iOS/macOS to enable cross-device testing
 - Using mDNS for easy discovery and bootstrap of the configuration service
 
+## Installation
+
+### Using Go Install
+
+```bash
+go install github.com/aran/devdomains/cmd/devdomains@latest
+```
+
+### From Binary Releases
+
+Download the latest binary for your platform from the [Releases page](https://github.com/aran/devdomains/releases).
+
+### Build from Source
+
+```bash
+git clone https://github.com/aran/devdomains.git
+cd devdomains
+go build ./cmd/devdomains
+```
+
+### Dependencies
+
+DevDomains requires [Caddy](https://caddyserver.com/docs/install) to be installed on your system.
+
 ## Why Use DevDomains?
 
 DevDomains solves several common challenges in development workflows:
@@ -27,6 +51,40 @@ When developing iOS apps with OAuth authentication, testing universal links and 
 ## Developed with Claude
 
 This project was largely written by Claude Code, including this README. The initial concept and requirements were provided by humans, but Claude did most of the implementation work, from code architecture to documentation.
+
+## Usage Examples
+
+### Basic Usage
+
+Map development domains to different local ports:
+
+```bash
+devdomains --domain dev.example.com:443:8000 --domain api.example.com:443:3000
+```
+
+This will:
+- Map `https://dev.example.com` to `localhost:8000`
+- Map `https://api.example.com` to `localhost:3000`
+
+### Multiple Port Mappings
+
+You can map multiple ports for a single domain:
+
+```bash
+devdomains --domain dev.example.com:443:8000,8080:3000
+```
+
+This will:
+- Map `https://dev.example.com` (port 443) to `localhost:8000`
+- Map `https://dev.example.com:8080` to `localhost:3000`
+
+### Custom Server Port
+
+Change the configuration server port (default is 9999):
+
+```bash
+devdomains --server-port 8888 --domain dev.example.com:443:8000
+```
 
 ## Setup Instructions
 
