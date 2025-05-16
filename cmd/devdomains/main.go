@@ -247,7 +247,7 @@ func run(cfg Config) {
 			log.Printf("Apple provisioning profile generated at: %s", absProfilePath)
 		}
 
-		log.Printf("🚀 To use Caddy as a reverse proxy, run: caddy run")
+		log.Printf("🚀 Caddy will be started automatically as a reverse proxy")
 
 		// Print information about accessing the target domains
 		if len(cfg.DomainMappings) > 0 {
