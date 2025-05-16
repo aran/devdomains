@@ -122,11 +122,11 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <key>PayloadVersion</key>
     <integer>1</integer>
     <key>PayloadIdentifier</key>
-    <string>com.mdns-caddy.configuration</string>
+    <string>com.devdomains.configuration</string>
     <key>PayloadUUID</key>
     <string>{{.MainUUID}}</string>
     <key>PayloadDisplayName</key>
-    <string>mDNS Caddy Configuration</string>
+    <string>DevDomains Configuration</string>
     <key>PayloadDescription</key>
     <string>This profile configures your device to trust local TLS certificates and resolve {{.DomainDesc}} through your local DNS-over-HTTPS server.</string>
     <key>PayloadContent</key>
@@ -138,13 +138,13 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
             <key>PayloadVersion</key>
             <integer>1</integer>
             <key>PayloadIdentifier</key>
-            <string>com.mdns-caddy.tls.rootcert</string>
+            <string>com.devdomains.tls.rootcert</string>
             <key>PayloadUUID</key>
             <string>{{.RootCertUUID}}</string>
             <key>PayloadDisplayName</key>
-            <string>mDNS Caddy Root Certificate</string>
+            <string>DevDomains Root Certificate</string>
             <key>PayloadDescription</key>
-            <string>Adds the mDNS Caddy CA root certificate</string>
+            <string>Adds the DevDomains CA root certificate</string>
             <key>PayloadContent</key>
             <data>
                 {{.RootCertBase64}}
@@ -158,7 +158,7 @@ const profileTemplate = `<?xml version="1.0" encoding="UTF-8"?>
             <key>PayloadVersion</key>
             <integer>1</integer>
             <key>PayloadIdentifier</key>
-            <string>com.mdns-caddy.dns</string>
+            <string>com.devdomains.dns</string>
             <key>PayloadUUID</key>
             <string>{{.DNSPayloadUUID}}</string>
             <key>PayloadDisplayName</key>

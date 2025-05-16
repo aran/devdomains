@@ -105,7 +105,7 @@ func (m *Manager) EnsureCA() error {
 	rootTemplate := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName: "mDNS Caddy Local Root CA",
+			CommonName: "DevDomains Local Root CA",
 		},
 		NotBefore:             now,
 		NotAfter:              now.Add(DefaultRootValidity),

@@ -55,7 +55,7 @@ const indexTemplate = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mDNS Caddy</title>
+    <title>Dev Domains</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -104,8 +104,8 @@ const indexTemplate = `<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <h1>mDNS Caddy Server</h1>
-    
+    <h1>Dev Domains Server</h1>
+
     <div class="info">
         <p>This server is running on port <code>{{.Port}}</code> and provides the following features:</p>
         <ul>
@@ -116,9 +116,9 @@ const indexTemplate = `<!DOCTYPE html>
         </ul>
         <a href="/p" class="link">Download Configuration Profile</a>
     </div>
-    
+
     <h2>How it Works</h2>
-    
+
     <div class="feature">
         <h3>1. Install the Configuration Profile</h3>
         <p>Download and install the configuration profile on your iOS or macOS device. This profile will:</p>
@@ -128,7 +128,7 @@ const indexTemplate = `<!DOCTYPE html>
             <li>Only affect DNS resolution for the domains you've configured and their subdomains</li>
         </ul>
     </div>
-    
+
     <div class="feature">
         <h3>2. Access Your Local Services</h3>
         <p>After installing the profile, you can access your local services at:</p>
@@ -138,7 +138,7 @@ const indexTemplate = `<!DOCTYPE html>
             {{ end }}
         </ul>
     </div>
-    
+
     <div class="feature">
         <h3>DNS over HTTPS</h3>
         <p>This server provides a DNS over HTTPS endpoint at:</p>

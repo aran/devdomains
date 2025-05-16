@@ -1,4 +1,4 @@
-module github.com/aran/mdns-caddy
+module github.com/aran/devdomains
 
 go 1.24.2
 

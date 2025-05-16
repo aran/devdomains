@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aran/mdns-caddy/internal/caddy"
-	"github.com/aran/mdns-caddy/internal/dns"
-	"github.com/aran/mdns-caddy/internal/html"
-	"github.com/aran/mdns-caddy/internal/mdns"
-	"github.com/aran/mdns-caddy/internal/profile"
+	"github.com/aran/devdomains/internal/caddy"
+	"github.com/aran/devdomains/internal/dns"
+	"github.com/aran/devdomains/internal/html"
+	"github.com/aran/devdomains/internal/mdns"
+	"github.com/aran/devdomains/internal/profile"
 	"github.com/spf13/cobra"
 )
 
@@ -44,16 +44,16 @@ type Config struct {
 func main() {
 	var domainMappingStrings []string
 
-	log.SetPrefix("[mdns-caddy] ")
+	log.SetPrefix("[devdomains] ")
 	cfg := Config{
 		ServerPort: 9999,
 		// No default domain mappings, these will come from the --domain flag
 	}
 
 	rootCmd := &cobra.Command{
-		Use:   "mdns-caddy",
-		Short: "mDNS Caddy - Local development with secure HTTPS and DNS over HTTPS",
-		Long: `mDNS Caddy advertises a local service via mDNS, provides a self-signed certificate,
+		Use:   "devdomains",
+		Short: "DevDomains - Local development with secure HTTPS and DNS over HTTPS",
+		Long: `DevDomains advertises a local service via mDNS, provides a self-signed certificate,
 serves DNS over HTTPS, and configures Caddy to proxy requests to your local services.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(domainMappingStrings) == 0 {
@@ -275,7 +275,7 @@ func run(cfg Config) {
 			scanner := bufio.NewScanner(caddyStdoutPipe)
 			for scanner.Scan() {
 				// Use fmt because Caddy will format itself
-				fmt.Printf("[Caddy] %s", scanner.Text())
+				fmt.Printf("[Caddy] %s\n", scanner.Text())
 			}
 		}()
 	}
@@ -287,7 +287,7 @@ func run(cfg Config) {
 		go func() {
 			scanner := bufio.NewScanner(caddyStderrPipe)
 			for scanner.Scan() {
-				fmt.Printf("[Caddy] %s", scanner.Text())
+				fmt.Printf("[Caddy] %s\n", scanner.Text())
 			}
 		}()
 	}

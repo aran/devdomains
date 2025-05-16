@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/aran/mdns-caddy/internal/network"
+	"github.com/aran/devdomains/internal/network"
 	"github.com/miekg/dns"
 )
 
