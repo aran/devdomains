@@ -152,6 +152,10 @@ func GenerateConfig(
 # mDNS hostnames (serve HTTP, DNS over HTTPS, and profile download)
 {{ range .MDNSHostnames }}
 {{ . }} {
+	log {
+		format console
+	}
+
 	tls {{ $.LocalTLSCertPath }} {{ $.LocalTLSKeyPath }}
 
 	# Handle DNS-over-HTTPS requests
@@ -175,6 +179,10 @@ func GenerateConfig(
 # Setup server blocks for each port mapping for this domain
 {{ range .PortMappings }}
 {{ $domain }}:{{ .ExternalPort }} {
+	log {
+		format console
+	}
+
 	tls {{ $certPath }} {{ $keyPath }}
 
 	# Forward all traffic to the internal port

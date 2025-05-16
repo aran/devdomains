@@ -44,6 +44,7 @@ type Config struct {
 func main() {
 	var domainMappingStrings []string
 
+	log.SetPrefix("[mdns-caddy] ")
 	cfg := Config{
 		ServerPort: 9999,
 		// No default domain mappings, these will come from the --domain flag
@@ -273,7 +274,8 @@ func run(cfg Config) {
 		go func() {
 			scanner := bufio.NewScanner(caddyStdoutPipe)
 			for scanner.Scan() {
-				log.Printf("[Caddy] %s", scanner.Text())
+				// Use fmt because Caddy will format itself
+				fmt.Printf("[Caddy] %s", scanner.Text())
 			}
 		}()
 	}
@@ -285,7 +287,7 @@ func run(cfg Config) {
 		go func() {
 			scanner := bufio.NewScanner(caddyStderrPipe)
 			for scanner.Scan() {
-				log.Printf("[Caddy] %s", scanner.Text())
+				fmt.Printf("[Caddy] %s", scanner.Text())
 			}
 		}()
 	}
