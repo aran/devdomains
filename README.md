@@ -1,0 +1,47 @@
+# DevDomains
+
+DevDomains is a local development tool that creates secure HTTPS endpoints for your local services, making them accessible via custom domain names. It solves common challenges in local web development by:
+
+- Generating self-signed TLS certificates for your development domains
+- Providing local DNS resolution that points your domains to your machine
+- Setting up a reverse proxy to route requests to the correct local ports
+- Creating mobile configuration profiles for iOS/macOS to enable cross-device testing
+- Using mDNS for easy discovery and bootstrap of the configuration service
+
+## Why Use DevDomains?
+
+DevDomains solves several common challenges in development workflows:
+
+- **Mobile App Testing**: Test universal links, authentication flows, and redirects on real devices
+- **HTTPS Requirements**: Use modern web APIs that require secure contexts without browser warnings
+- **Cross-Device Development**: Easily test on phones, tablets, and other devices on your local network
+- **Domain-Specific Features**: Test functionality that depends on specific domain names
+- **Local Environment Simulation**: Create a development environment that closely mirrors production
+
+## Real-World Use Case
+
+The authors of DevDomains created this tool specifically to test OAuth flows with universal links on iOS. 
+
+When developing iOS apps with OAuth authentication, testing universal links and ASWebAuthenticationSession can be challenging. These mechanisms require proper domain configuration, valid HTTPS certificates, and specific apple-app-site-association files. DevDomains streamlines this process by providing the necessary infrastructure to test these flows on physical devices without deploying to staging environments.
+
+## Developed with Claude
+
+This project was largely written by Claude Code, including this README. The initial concept and requirements were provided by humans, but Claude did most of the implementation work, from code architecture to documentation.
+
+## Setup Instructions
+
+1. Remove existing devdomains configuration profiles from your phone/computer if this isn't the first time. Settings > General > VPN & Device Management > the profile > remove. In this folder, manually remove old profiles/certs files if you want to refresh them, for example, if debugging issues. e.g. `rm profiles/*; rm certs/*`
+
+2. Run the command, e.g. `go run ./cmd/devdomains/main.go --domain dev.example.com:18888:8888,443:8000 --domain devaccounts.example.com:443:4433`
+
+3. Visit http://back.local:9999 in Safari on your phone. NOT https. NOT Chrome.
+
+4. Download the configuration profile with the big button. Hit "Allow". Hit "Close". Go to Settings. Expect to see a "Profile Downloaded" entry on the root screen, above Airplane Mode. Tap "Install" in top right corner. Enter passcode. Read the warning, Tap Install.
+
+5. Go to Settings > General > About > Certificate Trust Settings. Enable Full Trust for the new, DevDomains Local Root CA.
+
+6. Fully uninstall your dev iOS app. Universal links check for your apple-app-site-association file on app installation. If it's not working at app installation time, universal links and ASWebAuthenticationSessions will fail. Failure symptoms include ASWebAuthenticationSession immediately closing reporting a user cancellation, or failing to close when redirected to one of your app URLs.
+
+7. Sanity test your apple-app-site-association file. e.g. on your laptop, `curl --insecure --resolve dev.example.com:443:127.0.0.1 https://dev.example.com/.well-known/apple-app-site-association`. If this isn't working, you'll need to investigate your servers and port-forwarding before installing your app to your device.
+
+8. Install and run your app. Check your logs to make sure the expected DNS queries and apple-app-site-association queries are being performed and succeeding.
