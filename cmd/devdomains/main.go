@@ -39,6 +39,7 @@ type DomainMapping struct {
 // Config holds the application configuration
 type Config struct {
 	ServerPort     int             // Port for the HTTP server itself
+	TargetHost     string          // Target host to forward requests to
 	DomainMappings []DomainMapping // Domain mappings
 }
 
@@ -47,7 +48,8 @@ func main() {
 
 	log.SetPrefix("[devdomains] ")
 	cfg := Config{
-		ServerPort: 9999,
+		ServerPort:  9999,
+		TargetHost:  "localhost",
 		// No default domain mappings, these will come from the --domain flag
 	}
 
@@ -121,10 +123,11 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 	}
 
 	rootCmd.Flags().IntVar(&cfg.ServerPort, "server-port", cfg.ServerPort, "HTTP server port")
+	rootCmd.Flags().StringVar(&cfg.TargetHost, "target-host", cfg.TargetHost, "Target host to forward requests to")
 	rootCmd.Flags().StringArrayVar(&domainMappingStrings, "domain", []string{},
 		"Domain mappings in format domain:externalPort:internalPort[,externalPort:internalPort...] "+
 			"(e.g., dev.example.com:443:8000,18080:8080). Each port mapping consists of an external port (what Caddy listens on) "+
-			"and an internal port (what it forwards to on localhost).")
+			"and an internal port (what it forwards to).")
 	
 	// Set version information for --version flag
 	rootCmd.Version = version.Version
@@ -208,7 +211,8 @@ func run(cfg Config) {
 		for _, pm := range domainMapping.PortMappings {
 			portMappings = append(portMappings, caddy.PortMapping{
 				ExternalPort: pm.ExternalPort,
-				InternalPort: pm.InternalPort,
+				TargetPort:   pm.InternalPort,
+				TargetHost:   cfg.TargetHost,
 			})
 		}
 
@@ -254,8 +258,8 @@ func run(cfg Config) {
 			log.Printf("🔗 After installing the profile, access your local services at:")
 			for _, domainMapping := range cfg.DomainMappings {
 				for _, mapping := range domainMapping.PortMappings {
-					log.Printf("   https://%s:%d → localhost:%d",
-						domainMapping.Domain, mapping.ExternalPort, mapping.InternalPort)
+					log.Printf("   https://%s:%d → %s:%d",
+						domainMapping.Domain, mapping.ExternalPort, cfg.TargetHost, mapping.InternalPort)
 				}
 			}
 		}

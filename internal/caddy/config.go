@@ -10,10 +10,11 @@ import (
 	"github.com/aran/devdomains/internal/profile"
 )
 
-// PortMapping defines a mapping from external (Caddy) port to internal (localhost) port
+// PortMapping defines a mapping from external (Caddy) port to target endpoint
 type PortMapping struct {
-	ExternalPort int // The port Caddy listens on
-	InternalPort int // The port on localhost to forward to
+	ExternalPort int    // The port Caddy listens on
+	TargetPort   int    // The target port to forward to
+	TargetHost   string // The target host to forward to
 }
 
 // DomainMapping represents a domain with its port mappings
@@ -184,8 +185,8 @@ func GenerateConfig(
 
 	tls {{ $certPath }} {{ $keyPath }}
 
-	# Forward all traffic to the internal port
-	reverse_proxy http://localhost:{{ .InternalPort }}
+	# Forward all traffic to the target endpoint
+	reverse_proxy http://{{ .TargetHost }}:{{ .TargetPort }}
 }
 {{ end }}
 {{ end }}
