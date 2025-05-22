@@ -62,7 +62,6 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(domainMappingStrings) == 0 {
 				log.Fatalf("Error: At least one --domain mapping is required")
-				return
 			}
 
 			// Parse domain mappings from command line
@@ -74,7 +73,6 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 				firstColonIndex := strings.Index(domainMapping, ":")
 				if firstColonIndex == -1 {
 					log.Fatalf("Invalid domain mapping format: %s. Use domain:externalPort:internalPort[,...]", domainMapping)
-					return
 				}
 
 				domain := domainMapping[:firstColonIndex]
@@ -87,19 +85,16 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 					portParts := strings.Split(portPairSpec, ":")
 					if len(portParts) != 2 {
 						log.Fatalf("Invalid port mapping format: %s. Use externalPort:internalPort", portPairSpec)
-						return
 					}
 
 					externalPort, err := strconv.Atoi(portParts[0])
 					if err != nil {
 						log.Fatalf("Invalid external port: %s", portParts[0])
-						return
 					}
 
 					internalPort, err := strconv.Atoi(portParts[1])
 					if err != nil {
 						log.Fatalf("Invalid internal port: %s", portParts[1])
-						return
 					}
 
 					// Add this port mapping to the domain's list
