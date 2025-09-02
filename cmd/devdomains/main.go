@@ -165,13 +165,7 @@ func run(cfg Config) {
 		}
 	}
 
-	// The first domain will host the DNS server (consistent with your instruction)
-	var dnsDomain string
-	if len(allDomains) > 0 {
-		dnsDomain = allDomains[0]
-	}
-
-	http.HandleFunc("/", html.IndexHandler(cfg.ServerPort, dnsDomain, htmlPortMappings))
+	http.HandleFunc("/", html.IndexHandler(cfg.ServerPort, htmlPortMappings))
 
 	http.HandleFunc("/p", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(profileManager.ProfilePath); os.IsNotExist(err) {
@@ -197,7 +191,8 @@ func run(cfg Config) {
 		http.ServeFile(w, r, certPath)
 	})
 
-	// Set up DNS-over-HTTPS handler for all domains
+	// DNS-over-HTTPS handler: accessed via https://back.local/dns-query (Caddy proxies to here)
+	// The iOS/macOS profile configures devices to use this endpoint for resolving the configured domains
 	http.HandleFunc("/dns-query", dns.DoHHandlerMulti(allDomains))
 
 	serviceConfig := mdns.DefaultServiceConfig

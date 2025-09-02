@@ -15,11 +15,10 @@ type PortMapping struct {
 type TemplateData struct {
 	Port         int
 	HostAddress  string
-	TargetDomain string
 	PortMappings []PortMapping
 }
 
-func IndexHandler(port int, targetDomain string, portMappings []PortMapping) http.HandlerFunc {
+func IndexHandler(port int, portMappings []PortMapping) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if host == "" {
@@ -29,7 +28,6 @@ func IndexHandler(port int, targetDomain string, portMappings []PortMapping) htt
 		data := TemplateData{
 			Port:         port,
 			HostAddress:  host,
-			TargetDomain: targetDomain,
 			PortMappings: portMappings,
 		}
 
