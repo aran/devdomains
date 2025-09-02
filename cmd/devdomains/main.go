@@ -184,6 +184,19 @@ func run(cfg Config) {
 		http.ServeFile(w, r, profileManager.ProfilePath)
 	})
 
+	// Add endpoint for downloading the root certificate
+	http.HandleFunc("/cert", func(w http.ResponseWriter, r *http.Request) {
+		certPath := filepath.Join(cwd, "certs", "root-ca.crt")
+		if _, err := os.Stat(certPath); os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
+		w.Header().Set("Content-Disposition", "attachment; filename=devdomains-root-ca.crt")
+		http.ServeFile(w, r, certPath)
+	})
+
 	// Set up DNS-over-HTTPS handler for all domains
 	http.HandleFunc("/dns-query", dns.DoHHandlerMulti(allDomains))
 

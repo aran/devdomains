@@ -117,6 +117,13 @@ const indexTemplate = `<!DOCTYPE html>
         <a href="/p" class="link">Download Configuration Profile</a>
     </div>
 
+    <h2>Root Certificate</h2>
+    <div class="feature">
+        <p>For manual certificate installation or debugging purposes, you can download the root CA certificate directly:</p>
+        <a href="/cert" class="link">Download Root CA Certificate</a>
+        <p><small>Note: The configuration profile above includes this certificate and is the recommended installation method for iOS/macOS devices.</small></p>
+    </div>
+
     <h2>How it Works</h2>
 
     <div class="feature">
