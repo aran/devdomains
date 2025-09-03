@@ -13,12 +13,14 @@ type PortMapping struct {
 }
 
 type TemplateData struct {
-	Port         int
-	HostAddress  string
-	PortMappings []PortMapping
+	Port            int
+	HostAddress     string
+	LocalIP         string
+	PortMappings    []PortMapping
+	WireGuardEnabled bool
 }
 
-func IndexHandler(port int, portMappings []PortMapping) http.HandlerFunc {
+func IndexHandler(port int, portMappings []PortMapping, localIP string, wireGuardEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if host == "" {
@@ -26,9 +28,11 @@ func IndexHandler(port int, portMappings []PortMapping) http.HandlerFunc {
 		}
 
 		data := TemplateData{
-			Port:         port,
-			HostAddress:  host,
-			PortMappings: portMappings,
+			Port:             port,
+			HostAddress:      host,
+			LocalIP:          localIP,
+			PortMappings:     portMappings,
+			WireGuardEnabled: wireGuardEnabled,
 		}
 
 		tmpl, err := template.New("index").Parse(indexTemplate)
@@ -99,6 +103,44 @@ const indexTemplate = `<!DOCTYPE html>
         .feature {
             margin-bottom: 20px;
         }
+        .platform-section {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .platform-section h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .command {
+            background-color: #2c3e50;
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            margin: 10px 0;
+            overflow-x: auto;
+            position: relative;
+        }
+        .copy-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .copy-btn:hover {
+            background: #2980b9;
+        }
+        .copy-btn.copied {
+            background: #27ae60;
+        }
     </style>
 </head>
 <body>
@@ -107,19 +149,66 @@ const indexTemplate = `<!DOCTYPE html>
     <div class="info">
         <p>This server is running on port <code>{{.Port}}</code> and provides the following features:</p>
         <ul>
-            <li>mDNS discovery for local services</li>
-            <li>Self-signed TLS certificates for secure connections</li>
-            <li>DNS over HTTPS for targeted domain resolution</li>
-            <li>Caddy reverse proxy configuration</li>
+            <li>mDNS discovery for local services (iOS/macOS compatible)</li>
+            <li>Self-signed TLS certificates for secure HTTPS connections</li>
+            <li>DNS-over-HTTPS for domain resolution</li>
+            <li>Caddy reverse proxy for port forwarding</li>
         </ul>
-        <a href="/p" class="link">Download Configuration Profile</a>
+        <a href="/p" class="link">Download Configuration Profile (iOS/macOS)</a>
     </div>
 
-    <h2>Root Certificate</h2>
-    <div class="feature">
-        <p>For manual certificate installation or debugging purposes, you can download the root CA certificate directly:</p>
-        <a href="/cert" class="link">Download Root CA Certificate</a>
-        <p><small>Note: The configuration profile above includes this certificate and is the recommended installation method for iOS/macOS devices.</small></p>
+    <h2>Platform Setup Instructions</h2>
+    
+    <div class="platform-section">
+        <h3>📱 iOS/macOS Setup</h3>
+        <p>For Apple devices, use the configuration profile which includes certificate and DNS settings:</p>
+        <ol>
+            <li>Open Safari (not Chrome) and visit: <code>http://{{.HostAddress}}</code></li>
+            <li>Tap "Download Configuration Profile" button to download the profile</li>
+            <li>Open Settings app → Look for "Profile Downloaded" near the top</li>
+            <li>Tap "Install" and enter your passcode when prompted</li>
+            <li>After installation, go to Settings → General → About → Certificate Trust Settings</li>
+            <li>Enable full trust for "DevDomains Local Root CA"</li>
+        </ol>
+        <p><small>The profile automatically configures DNS-over-HTTPS for your domains.</small></p>
+    </div>
+
+    <div class="platform-section">
+        <h3>🤖 Android Setup</h3>
+        <p>For Android devices, you need to install the root certificate to trust HTTPS connections:</p>
+        
+        <h4>Install Root Certificate</h4>
+        <ol>
+            <li>Visit <code>http://{{if .LocalIP}}{{.LocalIP}}{{else}}YOUR_COMPUTER_IP{{end}}:{{.Port}}</code> on your Android device</li>
+            <li>Download the <a href="/cert">Root CA Certificate</a></li>
+            <li>Go to Settings → Security → Encryption & credentials</li>
+            <li>Tap "Install a certificate" → "CA certificate"</li>
+            <li>Select the downloaded certificate file</li>
+            <li>Give it a name like "DevDomains Local CA"</li>
+        </ol>
+        
+        {{if .WireGuardEnabled}}
+        <h4>WireGuard VPN for DNS Support</h4>
+        <p><strong>WireGuard VPN mode is enabled!</strong> Connect via VPN for automatic DNS resolution.</p>
+        
+        <p>Quick Setup:</p>
+        <ol>
+            <li>Install the WireGuard app from Google Play Store</li>
+            <li>Open WireGuard and tap the + button</li>
+            <li>Select "Scan from QR code" and scan this:</li>
+        </ol>
+        
+        <div style="text-align: center; margin: 20px 0;">
+            <img src="/wireguard-qr.png" alt="WireGuard Configuration" style="max-width: 300px; border: 1px solid #ddd; padding: 10px; background: white;">
+        </div>
+        
+        <p>Or <a href="/wg-client.conf">download the config file</a> and import it manually.</p>
+        {{else}}
+        <h4>Note about DNS</h4>
+        <p>Without WireGuard, DNS resolution requires configuring your app or using a local proxy. For full DNS support, run DevDomains with <code>--wireguard</code> flag.</p>
+        {{end}}
+        
+        {{if .LocalIP}}<p><small>Your computer's IP appears to be: <code>{{.LocalIP}}</code></small></p>{{end}}
     </div>
 
     <h2>How it Works</h2>
@@ -145,10 +234,76 @@ const indexTemplate = `<!DOCTYPE html>
     </div>
 
     <div class="feature">
-        <h3>DNS over HTTPS</h3>
-        <p>This server provides a DNS over HTTPS endpoint at:</p>
-        <code>https://{{.HostAddress}}/dns-query</code>
-        <p>The configuration profile will automatically use this for domain resolution.</p>
+        <h3>DNS Services</h3>
+        <p><strong>DNS-over-HTTPS:</strong> <code>https://{{.HostAddress}}/dns-query</code></p>
+        <p>This endpoint resolves your configured domains to this machine.</p>
     </div>
+
+    <script>
+    function copyCommand(elementId) {
+        const element = document.getElementById(elementId);
+        const textElement = element.querySelector('span');
+        const button = element.querySelector('.copy-btn');
+        
+        // Get text content, preserving line breaks
+        const text = textElement ? (textElement.innerText || textElement.textContent) : '';
+        
+        // Function to show success feedback
+        function showCopied() {
+            const originalText = button.textContent;
+            button.textContent = 'Copied!';
+            button.classList.add('copied');
+            
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.classList.remove('copied');
+            }, 2000);
+        }
+        
+        // Try modern clipboard API first (requires HTTPS or localhost)
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(() => {
+                showCopied();
+            }).catch(err => {
+                console.error('Clipboard API failed, using fallback: ', err);
+                fallbackCopy();
+            });
+        } else {
+            // Use fallback for HTTP or older browsers
+            fallbackCopy();
+        }
+        
+        function fallbackCopy() {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '0';
+            textarea.style.left = '0';
+            textarea.style.width = '2em';
+            textarea.style.height = '2em';
+            textarea.style.padding = '0';
+            textarea.style.border = 'none';
+            textarea.style.outline = 'none';
+            textarea.style.boxShadow = 'none';
+            textarea.style.background = 'transparent';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showCopied();
+                } else {
+                    console.error('Fallback copy failed');
+                }
+            } catch (err) {
+                console.error('Fallback copy error: ', err);
+            }
+            
+            document.body.removeChild(textarea);
+        }
+    }
+    </script>
 </body>
 </html>`

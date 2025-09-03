@@ -3,7 +3,7 @@
 DevDomains is a local development tool that creates secure HTTPS endpoints for your local services, making them accessible via custom domain names. It solves common challenges in local web development by:
 
 - Generating self-signed TLS certificates for your development domains
-- Providing local DNS resolution that points your domains to your machine
+- Providing local DNS resolution via DNS-over-HTTPS (DoH)
 - Setting up a reverse proxy to route requests to the correct local ports
 - Creating mobile configuration profiles for iOS/macOS to enable cross-device testing
 - Using mDNS for easy discovery and bootstrap of the configuration service
@@ -88,6 +88,8 @@ devdomains --server-port 8888 --domain dev.example.com:443:8000
 
 ## Setup Instructions
 
+### iOS Setup
+
 1. Remove existing devdomains configuration profiles from your phone/computer if this isn't the first time. Settings > General > VPN & Device Management > the profile > remove. In this folder, manually remove old profiles/certs files if you want to refresh them, for example, if debugging issues. e.g. `rm profiles/*; rm certs/*`
 
 2. Run the command, e.g. `go run ./cmd/devdomains/main.go --domain dev.example.com:18888:8888,443:8000 --domain devaccounts.example.com:443:4433`
@@ -98,8 +100,32 @@ devdomains --server-port 8888 --domain dev.example.com:443:8000
 
 5. Go to Settings > General > About > Certificate Trust Settings. Enable Full Trust for the new, DevDomains Local Root CA.
 
-6. Fully uninstall your dev iOS app. Universal links check for your apple-app-site-association file on app installation. If it's not working at app installation time, universal links and ASWebAuthenticationSessions will fail. Failure symptoms include ASWebAuthenticationSession immediately closing reporting a user cancellation, or failing to close when redirected to one of your app URLs.
+6. Fully uninstall your dev iOS app (if testing universal links). Universal links check for your apple-app-site-association file on app installation. If it's not working at app installation time, universal links and ASWebAuthenticationSessions will fail. Failure symptoms include ASWebAuthenticationSession immediately closing reporting a user cancellation, or failing to close when redirected to one of your app URLs.
 
-7. Sanity test your apple-app-site-association file. e.g. on your laptop, `curl --insecure --resolve dev.example.com:443:127.0.0.1 https://dev.example.com/.well-known/apple-app-site-association`. If this isn't working, you'll need to investigate your servers and port-forwarding before installing your app to your device.
+7. Sanity test your apple-app-site-association file (if applicable). e.g. on your laptop, `curl --insecure --resolve dev.example.com:443:127.0.0.1 https://dev.example.com/.well-known/apple-app-site-association`.
 
 8. Install and run your app. Check your logs to make sure the expected DNS queries and apple-app-site-association queries are being performed and succeeding.
+
+### Android Setup
+
+Android devices can install the root certificate to trust HTTPS connections to your development domains.
+
+1. Run DevDomains with your domain configuration:
+   ```bash
+   devdomains --domain dev.example.com:443:8000 --domain api.example.com:443:3000
+   ```
+   Note your computer's IP address (shown in the logs or on the web interface)
+
+2. **Install the Root Certificate**:
+   - Visit `http://YOUR_COMPUTER_IP:9999` in your Android browser
+   - Download the Root CA Certificate
+   - Go to Settings → Security → Encryption & credentials
+   - Tap "Install a certificate" → "CA certificate"
+   - Select the downloaded certificate file
+   - Name it something like "DevDomains Local CA"
+
+3. **Important Notes**:
+   - This enables HTTPS connections to your development domains
+   - DNS resolution requires additional setup in your app or using a debugging proxy
+   - Android's Private DNS feature cannot be used for local development as it requires a public hostname with valid certificates
+   - Consider using your app's network configuration or tools like Charles Proxy for DNS override

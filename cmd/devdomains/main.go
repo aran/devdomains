@@ -19,6 +19,7 @@ import (
 	"github.com/aran/devdomains/internal/dns"
 	"github.com/aran/devdomains/internal/html"
 	"github.com/aran/devdomains/internal/mdns"
+	"github.com/aran/devdomains/internal/network"
 	"github.com/aran/devdomains/internal/profile"
 	"github.com/aran/devdomains/internal/version"
 	"github.com/spf13/cobra"
@@ -153,6 +154,9 @@ func run(cfg Config) {
 		allDomains = append(allDomains, domainMapping.Domain)
 	}
 
+	// Get primary IP for display
+	primaryIP := network.GetPrimaryIP()
+
 	// Convert our domain port mappings to the HTML template format
 	var htmlPortMappings []html.PortMapping
 	for _, domainMapping := range cfg.DomainMappings {
@@ -165,7 +169,7 @@ func run(cfg Config) {
 		}
 	}
 
-	http.HandleFunc("/", html.IndexHandler(cfg.ServerPort, htmlPortMappings))
+	http.HandleFunc("/", html.IndexHandler(cfg.ServerPort, htmlPortMappings, primaryIP, cfg.EnableWireGuard))
 
 	http.HandleFunc("/p", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(profileManager.ProfilePath); os.IsNotExist(err) {
@@ -318,42 +322,44 @@ func run(cfg Config) {
 		log.Printf("Caddy started successfully (PID: %d)", caddyCmd.Process.Pid)
 		caddyRunning = true
 
-		// Run DNS-over-HTTPS self-tests after Caddy starts
+		// Run DNS self-tests after servers start
 		go func() {
-			// Give Caddy a little time to start
+			// Give servers a little time to start
 			time.Sleep(2 * time.Second)
 
-			if !caddyRunning {
-				log.Printf("⚠️ Skipping DNS-over-HTTPS self-test: Caddy is not running")
-				return
+			testOpts := dns.SelfTestOptions{
+				ServerHostname: strings.TrimSuffix(serviceConfig.Hostname, "."),
+				ServerPort:     443, // Caddy serves HTTPS on port 443 by default
+				RootCAPath:     filepath.Join(cwd, "certs", "root-ca.crt"),
 			}
 
-			// Run a DNS-over-HTTPS self-test for each domain
+			// Test each domain
 			for _, domain := range allDomains {
-				testOpts := dns.SelfTestOptions{
-					TargetDomain:   domain,
-					ServerHostname: strings.TrimSuffix(serviceConfig.Hostname, "."),
-					ServerPort:     443, // Caddy serves HTTPS on port 443 by default
-					RootCAPath:     filepath.Join(cwd, "certs", "root-ca.crt"),
-				}
+				testOpts.TargetDomain = domain
 
-				log.Printf("Running DNS-over-HTTPS self-test for domain: %s", domain)
+				// DNS-over-HTTPS tests
+				if caddyRunning {
+					log.Printf("Running DNS-over-HTTPS self-test for domain: %s", domain)
 
-				// Try GET method first
-				err := dns.RunSelfTest(testOpts)
-				if err != nil {
-					log.Printf("⚠️ DNS-over-HTTPS GET self-test for %s failed: %v", domain, err)
-
-					// If GET failed, try POST method as a fallback
-					err = dns.RunSelfTestPost(testOpts)
+					// Try GET method first
+					err := dns.RunSelfTest(testOpts)
 					if err != nil {
-						log.Printf("⚠️ DNS-over-HTTPS POST self-test for %s also failed: %v", domain, err)
-						log.Printf("⚠️ Note: The self-test failure doesn't prevent the server from running")
-						log.Printf("⚠️ DNS resolution for %s might not work correctly until the issue is resolved", domain)
-					} else {
-						log.Printf("✓ DNS-over-HTTPS POST self-test for %s passed successfully", domain)
+						log.Printf("⚠️ DNS-over-HTTPS GET self-test for %s failed: %v", domain, err)
+
+						// If GET failed, try POST method as a fallback
+						err = dns.RunSelfTestPost(testOpts)
+						if err != nil {
+							log.Printf("⚠️ DNS-over-HTTPS POST self-test for %s also failed: %v", domain, err)
+							log.Printf("⚠️ Note: The self-test failure doesn't prevent the server from running")
+							log.Printf("⚠️ DNS resolution for %s might not work correctly until the issue is resolved", domain)
+						} else {
+							log.Printf("✓ DNS-over-HTTPS POST self-test for %s passed successfully", domain)
+						}
 					}
+				} else {
+					log.Printf("⚠️ Skipping DNS-over-HTTPS self-test: Caddy is not running")
 				}
+
 			}
 		}()
 	}

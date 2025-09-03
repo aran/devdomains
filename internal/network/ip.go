@@ -54,3 +54,50 @@ func GetLocalIPs() ([]net.IP, error) {
 
 	return ips, nil
 }
+
+// GetPrimaryIP returns the most likely primary IP address for external access
+// It prioritizes private network IPs in common ranges
+func GetPrimaryIP() string {
+	ips, err := GetLocalIPs()
+	if err != nil || len(ips) == 0 {
+		return ""
+	}
+
+	// Prioritize common private network ranges
+	// 192.168.x.x (most home networks)
+	// 10.x.x.x (larger private networks)
+	// 172.16-31.x.x (less common)
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
+			if ip4[0] == 192 && ip4[1] == 168 {
+				return ip.String()
+			}
+		}
+	}
+
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
+			if ip4[0] == 10 {
+				return ip.String()
+			}
+		}
+	}
+
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
+			if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
+				return ip.String()
+			}
+		}
+	}
+
+	// Return the first IPv4 if no private network IP found
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
+			return ip.String()
+		}
+	}
+
+	// Return first IP as fallback (might be IPv6)
+	return ips[0].String()
+}
