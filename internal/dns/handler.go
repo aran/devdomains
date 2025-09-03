@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aran/devdomains/internal/network"
 	"github.com/miekg/dns"
@@ -103,10 +104,6 @@ func DoHHandlerMulti(targetDomains []string) http.HandlerFunc {
 
 // handleDNSQueryMulti processes DNS queries for multiple domains and returns the appropriate response
 func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, error) {
-	response := new(dns.Msg)
-	response.SetReply(query)
-	response.Authoritative = true
-
 	// Process each question
 	for _, q := range query.Question {
 		qname := strings.TrimSuffix(q.Name, ".")
@@ -124,6 +121,11 @@ func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, erro
 		}
 
 		if matchedDomain != "" {
+			// Handle locally configured domains
+			response := new(dns.Msg)
+			response.SetReply(query)
+			response.Authoritative = true
+			
 			// Get local machine IPs
 			ips, err := network.GetLocalIPs()
 			if err != nil {
@@ -185,15 +187,145 @@ func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, erro
 				log.Printf("DNS Response: NOERROR with empty answer for %s type %s", 
 					q.Name, dns.TypeToString[q.Qtype])
 			}
-		} else {
-			// For non-target domains, we should refuse to answer
-			// This is important as the profile is configured to only ask us about specific domains
-			log.Printf("DNS Query refused: %s (not in target domains)", q.Name)
-			response.Rcode = dns.RcodeRefused
+			
+			return response, nil
 		}
 	}
 
-	return response, nil
+	// For non-target domains, forward to upstream DNS
+	return forwardToUpstream(query)
+}
+
+// forwardToUpstream forwards DNS queries to upstream DNS servers
+func forwardToUpstream(query *dns.Msg) (*dns.Msg, error) {
+	// Default upstream DNS servers
+	upstreams := []string{
+		"8.8.8.8:53",     // Google DNS
+		"8.8.4.4:53",     // Google DNS secondary
+		"1.1.1.1:53",     // Cloudflare DNS
+	}
+	
+	return forwardToUpstreamServers(query, upstreams)
+}
+
+// forwardToUpstreamServers forwards DNS queries to specified upstream DNS servers
+func forwardToUpstreamServers(query *dns.Msg, upstreams []string) (*dns.Msg, error) {
+	client := new(dns.Client)
+	client.Timeout = 5 * time.Second
+
+	// Try each upstream server until one works
+	for _, upstream := range upstreams {
+		resp, _, err := client.Exchange(query, upstream)
+		if err == nil && resp != nil {
+			if len(query.Question) > 0 {
+				log.Printf("DNS Response: forwarded %s to upstream %s", query.Question[0].Name, upstream)
+			}
+			return resp, nil
+		}
+		if err != nil {
+			log.Printf("DNS upstream %s failed: %v", upstream, err)
+		}
+	}
+
+	// If all upstreams fail, return SERVFAIL
+	response := new(dns.Msg)
+	response.SetReply(query)
+	response.Rcode = dns.RcodeServerFailure
+	return response, fmt.Errorf("all upstream DNS servers failed")
+}
+
+// handleDNSQueryWithUpstreams processes DNS queries with custom upstream servers
+func handleDNSQueryWithUpstreams(query *dns.Msg, targetDomains []string, upstreams []string) (*dns.Msg, error) {
+	// Process each question
+	for _, q := range query.Question {
+		qname := strings.TrimSuffix(q.Name, ".")
+
+		// Log the DNS query
+		log.Printf("DNS Query: type=%s name=%s", dns.TypeToString[q.Qtype], q.Name)
+
+		// Check if this is a request for one of our target domains or their subdomains
+		matchedDomain := ""
+		for _, domain := range targetDomains {
+			if qname == domain || strings.HasSuffix(qname, "."+domain) {
+				matchedDomain = domain
+				break
+			}
+		}
+
+		if matchedDomain != "" {
+			// Handle locally configured domains
+			response := new(dns.Msg)
+			response.SetReply(query)
+			response.Authoritative = true
+			
+			// Get local machine IPs
+			ips, err := network.GetLocalIPs()
+			if err != nil {
+				return nil, fmt.Errorf("error getting local IPs: %w", err)
+			}
+
+			// Keep track of whether we handled this query type
+			handled := false
+
+			switch q.Qtype {
+			case dns.TypeA:
+				// Find an IPv4 address to return
+				for _, ip := range ips {
+					if ipv4 := ip.To4(); ipv4 != nil {
+						rr := &dns.A{
+							Hdr: dns.RR_Header{
+								Name:   q.Name,
+								Rrtype: dns.TypeA,
+								Class:  dns.ClassINET,
+								Ttl:    60, // short TTL for development
+							},
+							A: ipv4,
+						}
+						response.Answer = append(response.Answer, rr)
+						log.Printf("DNS Response: A record for %s -> %s", q.Name, ipv4.String())
+						handled = true
+						break // Only include one answer for simplicity
+					}
+				}
+
+			case dns.TypeAAAA:
+				// Find an IPv6 address to return
+				for _, ip := range ips {
+					if ipv4 := ip.To4(); ipv4 == nil && ip.To16() != nil {
+						rr := &dns.AAAA{
+							Hdr: dns.RR_Header{
+								Name:   q.Name,
+								Rrtype: dns.TypeAAAA,
+								Class:  dns.ClassINET,
+								Ttl:    60, // short TTL for development
+							},
+							AAAA: ip,
+						}
+						response.Answer = append(response.Answer, rr)
+						log.Printf("DNS Response: AAAA record for %s -> %s", q.Name, ip.String())
+						handled = true
+						break // Only include one answer for simplicity
+					}
+				}
+			default:
+				// For unsupported record types, we return NOERROR with empty answer section
+				// This is the correct behavior according to RFC 1035 for authoritative servers
+				log.Printf("DNS Query for unsupported type %s (code %d) for %s", 
+					dns.TypeToString[q.Qtype], q.Qtype, q.Name)
+				// response.Rcode is already NOERROR (0) by default
+			}
+			
+			if !handled {
+				log.Printf("DNS Response: NOERROR with empty answer for %s type %s", 
+					q.Name, dns.TypeToString[q.Qtype])
+			}
+			
+			return response, nil
+		}
+	}
+
+	// For non-target domains, forward to upstream DNS
+	return forwardToUpstreamServers(query, upstreams)
 }
 
 // handleDNSQuery processes DNS queries for a single domain - maintained for backward compatibility

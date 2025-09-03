@@ -44,6 +44,8 @@ type Config struct {
 	DomainMappings []DomainMapping // Domain mappings
 }
 
+const DNSPort = 5354 // Fixed DNS server port (5354 to avoid mDNS conflict on 5353)
+
 func main() {
 	var domainMappingStrings []string
 
@@ -198,6 +200,22 @@ func run(cfg Config) {
 	// DNS-over-HTTPS handler: accessed via https://back.local/dns-query (Caddy proxies to here)
 	// The iOS/macOS profile configures devices to use this endpoint for resolving the configured domains
 	http.HandleFunc("/dns-query", dns.DoHHandlerMulti(allDomains))
+
+	// Start regular DNS server
+	dnsServer := dns.NewServer(allDomains, DNSPort)
+	if err := dnsServer.Start(); err != nil {
+		log.Printf("Warning: Failed to start DNS server on port %d: %v", DNSPort, err)
+		log.Printf("DNS server will not be available.")
+	} else {
+		// Also start TCP DNS server
+		dnsServer.StartTCP()
+		defer dnsServer.Stop()
+		
+		// Log available DNS addresses
+		if addresses, err := dnsServer.GetLocalDNSAddresses(); err == nil && len(addresses) > 0 {
+			log.Printf("DNS server available at: %s (UDP/TCP)", addresses[0])
+		}
+	}
 
 	serviceConfig := mdns.DefaultServiceConfig
 	serviceConfig.Port = cfg.ServerPort
