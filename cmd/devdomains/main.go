@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,6 +23,8 @@ import (
 	"github.com/aran/devdomains/internal/network"
 	"github.com/aran/devdomains/internal/profile"
 	"github.com/aran/devdomains/internal/version"
+	"github.com/aran/devdomains/internal/wireguard"
+	qrcode "github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
 )
 
@@ -42,9 +45,9 @@ type Config struct {
 	ServerPort     int             // Port for the HTTP server itself
 	TargetHost     string          // Target host to forward requests to
 	DomainMappings []DomainMapping // Domain mappings
+	EnableWireGuard bool           // Enable WireGuard VPN mode
 }
 
-const DNSPort = 5354 // Fixed DNS server port (5354 to avoid mDNS conflict on 5353)
 
 func main() {
 	var domainMappingStrings []string
@@ -126,6 +129,22 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 		"Domain mappings in format domain:externalPort:internalPort[,externalPort:internalPort...] "+
 			"(e.g., dev.example.com:443:8000,18080:8080). Each port mapping consists of an external port (what Caddy listens on) "+
 			"and an internal port (what it forwards to).")
+	rootCmd.Flags().BoolVar(&cfg.EnableWireGuard, "wireguard", false, "Enable WireGuard VPN mode for Android client support")
+	
+	// Add DNS subcommand for privileged DNS server
+	dnsCmd := &cobra.Command{
+		Use:    "dns",
+		Short:  "Run DNS server only (internal use for port 53 binding)",
+		Hidden: true, // Hide from help output
+		Run:    runDNSServer,
+	}
+	
+	dnsCmd.Flags().String("bind", "", "Address to bind DNS server to")
+	dnsCmd.Flags().StringSlice("domains", []string{}, "Domains to resolve")
+	dnsCmd.MarkFlagRequired("bind")
+	dnsCmd.MarkFlagRequired("domains")
+	
+	rootCmd.AddCommand(dnsCmd)
 	
 	// Set version information for --version flag
 	rootCmd.Version = version.Version
@@ -136,6 +155,39 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Error executing command: %v", err)
 	}
+}
+
+// runDNSServer runs just the DNS server - used as a subprocess for privileged port binding
+func runDNSServer(cmd *cobra.Command, args []string) {
+	bindAddr, _ := cmd.Flags().GetString("bind")
+	domains, _ := cmd.Flags().GetStringSlice("domains")
+	
+	// Parse bind address to get IP and port
+	host, portStr, err := net.SplitHostPort(bindAddr)
+	if err != nil {
+		log.Fatalf("Invalid bind address: %v", err)
+	}
+	
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		log.Fatalf("Invalid port: %v", err)
+	}
+	
+	// Start DNS server using existing code
+	dnsServer := dns.NewServerWithAddress(domains, host, port)
+	if err := dnsServer.Start(); err != nil {
+		log.Fatalf("Failed to start DNS server: %v", err)
+	}
+	
+	log.Printf("DNS server running on %s for domains: %v", bindAddr, domains)
+	
+	// Block until signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	
+	log.Println("DNS server shutting down")
+	dnsServer.Stop()
 }
 
 func run(cfg Config) {
@@ -201,20 +253,90 @@ func run(cfg Config) {
 	// The iOS/macOS profile configures devices to use this endpoint for resolving the configured domains
 	http.HandleFunc("/dns-query", dns.DoHHandlerMulti(allDomains))
 
-	// Start regular DNS server
-	dnsServer := dns.NewServer(allDomains, DNSPort)
-	if err := dnsServer.Start(); err != nil {
-		log.Printf("Warning: Failed to start DNS server on port %d: %v", DNSPort, err)
-		log.Printf("DNS server will not be available.")
-	} else {
-		// Also start TCP DNS server
-		dnsServer.StartTCP()
-		defer dnsServer.Stop()
+	// WireGuard setup if enabled
+	var wgServer *wireguard.Server
+	var dnsProcess *exec.Cmd
+	if cfg.EnableWireGuard {
+		log.Println("WireGuard mode enabled - setting up VPN server...")
 		
-		// Log available DNS addresses
-		if addresses, err := dnsServer.GetLocalDNSAddresses(); err == nil && len(addresses) > 0 {
-			log.Printf("DNS server available at: %s (UDP/TCP)", addresses[0])
+		ctx := context.Background()
+		wgServer, err = wireguard.NewServer(ctx, cwd)
+		if err != nil {
+			log.Fatalf("Failed to create WireGuard server: %v", err)
 		}
+		
+		// Initialize WireGuard (load/generate keys and configs)
+		if err := wgServer.Initialize(); err != nil {
+			log.Fatalf("Failed to initialize WireGuard: %v", err)
+		}
+		
+		// Start WireGuard interface
+		if err := wgServer.Start(); err != nil {
+			log.Fatalf("Failed to start WireGuard: %v", err)
+		}
+		defer wgServer.Stop()
+		
+		// Start DNS server as privileged subprocess
+		// Use os.Executable() to get the actual binary path, which works with 'go run'
+		binaryPath, err := os.Executable()
+		if err != nil {
+			log.Fatalf("Could not determine executable path: %v", err)
+		}
+		
+		dnsProcess = exec.Command("sudo", binaryPath, "dns",
+			"--bind", fmt.Sprintf("%s:53", wgServer.GetServerIP()),
+			"--domains", strings.Join(allDomains, ","))
+		
+		// Pipe all output so users can see DNS server logs
+		dnsProcess.Stdout = os.Stdout
+		dnsProcess.Stderr = os.Stderr
+		dnsProcess.Stdin = os.Stdin // Allow sudo password prompt
+		
+		if err := dnsProcess.Start(); err != nil {
+			log.Fatalf("Failed to start DNS server: %v", err)
+		}
+		
+		// Ensure DNS process is killed on exit
+		defer func() {
+			if dnsProcess != nil && dnsProcess.Process != nil {
+				dnsProcess.Process.Kill()
+			}
+		}()
+		
+		log.Printf("DNS server started on %s:53", wgServer.GetServerIP())
+		
+		// Add WireGuard config download endpoint
+		http.HandleFunc("/wg-client.conf", func(w http.ResponseWriter, r *http.Request) {
+			config, err := wgServer.GetClientConfig()
+			if err != nil {
+				http.Error(w, "Failed to get WireGuard config", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Disposition", "attachment; filename=wg-client.conf")
+			w.Write([]byte(config))
+		})
+		
+		// Add WireGuard QR code endpoint
+		http.HandleFunc("/wireguard-qr.png", func(w http.ResponseWriter, r *http.Request) {
+			config, err := wgServer.GetClientConfig()
+			if err != nil {
+				http.Error(w, "Failed to get WireGuard config", http.StatusInternalServerError)
+				return
+			}
+			
+			// Generate QR code PNG
+			png, err := qrcode.Encode(config, qrcode.Medium, 512)
+			if err != nil {
+				http.Error(w, "Failed to generate QR code", http.StatusInternalServerError)
+				return
+			}
+			
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(png)
+		})
+		
+		log.Println("WireGuard server ready - client config available at /wg-client.conf and QR code at /wireguard-qr.png")
 	}
 
 	serviceConfig := mdns.DefaultServiceConfig
@@ -290,14 +412,8 @@ func run(cfg Config) {
 		}
 	}
 
-	go func() {
-		mdnsHost := strings.TrimSuffix(serviceConfig.Hostname, ".")
-		log.Printf("HTTP server starting on :%d", cfg.ServerPort)
-		log.Printf("Access local server at http://%s:%d", mdnsHost, cfg.ServerPort)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
-		}
-	}()
+	// Log server info  
+	mdnsHost := strings.TrimSuffix(serviceConfig.Hostname, ".")
 
 	// Start Caddy as a subprocess
 	log.Printf("Starting Caddy server for HTTPS and DNS-over-HTTPS...")
@@ -384,24 +500,46 @@ func run(cfg Config) {
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
-	<-stop
-
-	// Stop Caddy gracefully if it's running
-	if caddyCmd.Process != nil {
-		log.Printf("Stopping Caddy server...")
-		if err := caddyCmd.Process.Signal(os.Interrupt); err != nil {
-			log.Printf("Error sending interrupt signal to Caddy: %v", err)
-			// Force kill if interrupt doesn't work
-			if err := caddyCmd.Process.Kill(); err != nil {
-				log.Printf("Error killing Caddy process: %v", err)
+	
+	go func() {
+		<-stop
+		log.Println("\nShutting down...")
+		
+		// Kill DNS subprocess if running
+		if dnsProcess != nil && dnsProcess.Process != nil {
+			log.Println("Stopping DNS server...")
+			dnsProcess.Process.Kill()
+		}
+		
+		// Stop WireGuard if running
+		if wgServer != nil {
+			log.Println("Stopping WireGuard...")
+			wgServer.Stop()
+		}
+		
+		// Stop Caddy gracefully if it's running
+		if caddyCmd.Process != nil {
+			log.Printf("Stopping Caddy server...")
+			if err := caddyCmd.Process.Signal(os.Interrupt); err != nil {
+				log.Printf("Error sending interrupt signal to Caddy: %v", err)
+				// Force kill if interrupt doesn't work
+				if err := caddyCmd.Process.Kill(); err != nil {
+					log.Printf("Error killing Caddy process: %v", err)
+				}
 			}
 		}
-	}
-	log.Println("Shutting down servers...")
-
-	if err := server.Shutdown(context.Background()); err != nil {
-		log.Fatalf("HTTP server shutdown error: %v", err)
+		
+		// Shutdown HTTP server
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(ctx)
+	}()
+	
+	// Start HTTP server (blocking)
+	log.Printf("HTTP server starting on :%d", cfg.ServerPort)
+	log.Printf("Access local server at http://%s:%d", mdnsHost, cfg.ServerPort)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("HTTP server error: %v", err)
 	}
 
 	log.Println("Servers exited gracefully")

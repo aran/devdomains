@@ -1,6 +1,7 @@
 # Generated files
 /certs/
 /profiles/
+/wireguard/
 /Caddyfile
 
 # Binaries for programs and plugins

@@ -15,6 +15,7 @@ type Server struct {
 	domains   []string
 	server    *dns.Server
 	port      int
+	address   string // Optional specific address to bind to
 	upstreams []string
 }
 
@@ -23,6 +24,20 @@ func NewServer(domains []string, port int) *Server {
 	return &Server{
 		domains: domains,
 		port:    port,
+		upstreams: []string{
+			"8.8.8.8:53",     // Google DNS
+			"8.8.4.4:53",     // Google DNS secondary
+			"1.1.1.1:53",     // Cloudflare DNS
+		},
+	}
+}
+
+// NewServerWithAddress creates a new DNS server that binds to a specific address
+func NewServerWithAddress(domains []string, address string, port int) *Server {
+	return &Server{
+		domains: domains,
+		port:    port,
+		address: address,
 		upstreams: []string{
 			"8.8.8.8:53",     // Google DNS
 			"8.8.4.4:53",     // Google DNS secondary
@@ -49,12 +64,17 @@ func (s *Server) Start() error {
 	dns.HandleFunc(".", s.handleDNSRequest)
 
 	// Configure the server
+	addr := fmt.Sprintf(":%d", s.port)
+	if s.address != "" {
+		addr = fmt.Sprintf("%s:%d", s.address, s.port)
+	}
+	
 	s.server = &dns.Server{
-		Addr: fmt.Sprintf(":%d", s.port),
+		Addr: addr,
 		Net:  "udp",
 	}
 
-	log.Printf("Starting DNS server on UDP port %d", s.port)
+	log.Printf("Starting DNS server on %s (UDP)", addr)
 	log.Printf("DNS server will resolve domains: %s", strings.Join(s.domains, ", "))
 
 	// Start the server in a goroutine
