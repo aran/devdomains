@@ -46,6 +46,7 @@ type Config struct {
 	TargetHost     string          // Target host to forward requests to
 	DomainMappings []DomainMapping // Domain mappings
 	EnableWireGuard bool           // Enable WireGuard VPN mode
+	Hostname       string          // mDNS hostname (without .local suffix)
 }
 
 
@@ -56,6 +57,7 @@ func main() {
 	cfg := Config{
 		ServerPort:  9999,
 		TargetHost:  "localhost",
+		Hostname:    "back",
 		// No default domain mappings, these will come from the --domain flag
 	}
 
@@ -125,6 +127,7 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 
 	rootCmd.Flags().IntVar(&cfg.ServerPort, "server-port", cfg.ServerPort, "HTTP server port")
 	rootCmd.Flags().StringVar(&cfg.TargetHost, "target-host", cfg.TargetHost, "Target host to forward requests to")
+	rootCmd.Flags().StringVar(&cfg.Hostname, "hostname", cfg.Hostname, "mDNS hostname (without .local suffix)")
 	rootCmd.Flags().StringArrayVar(&domainMappingStrings, "domain", []string{},
 		"Domain mappings in format domain:externalPort:internalPort[,externalPort:internalPort...] "+
 			"(e.g., dev.example.com:443:8000,18080:8080). Each port mapping consists of an external port (what Caddy listens on) "+
@@ -341,6 +344,8 @@ func run(cfg Config) {
 
 	serviceConfig := mdns.DefaultServiceConfig
 	serviceConfig.Port = cfg.ServerPort
+	serviceConfig.Name = cfg.Hostname
+	serviceConfig.Hostname = cfg.Hostname + ".local."
 
 	mdnsServer, err := mdns.SetupServer(serviceConfig)
 	if err != nil {
