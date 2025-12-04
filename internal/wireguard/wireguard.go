@@ -117,27 +117,20 @@ func (s *Server) Start() error {
 // Stop stops the WireGuard interface
 func (s *Server) Stop() error {
 	configPath := filepath.Join(s.workingDir, "wg0.conf")
-	
-	if !s.isInterfaceUp() {
-		log.Println("WireGuard interface is already down")
-		return nil
-	}
-	
+
 	log.Println("Stopping WireGuard interface...")
-	
+
 	cmd := exec.CommandContext(s.ctx, "sudo", "wg-quick", "down", configPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	
+
 	if err := cmd.Run(); err != nil {
-		// Don't fail if already down
-		if !strings.Contains(err.Error(), "is not a WireGuard interface") {
-			return fmt.Errorf("failed to stop WireGuard: %w", err)
-		}
+		log.Printf("Warning: wg-quick down failed: %v", err)
+	} else {
+		log.Println("WireGuard interface stopped")
 	}
-	
-	log.Println("WireGuard interface stopped")
+
 	return nil
 }
 
