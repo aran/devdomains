@@ -511,12 +511,6 @@ func run(cfg Config) {
 			dnsProcess.Process.Kill()
 		}
 
-		// Stop WireGuard if running
-		if wgServer != nil {
-			slog.Info("stopping WireGuard")
-			wgServer.Stop()
-		}
-
 		// Stop Caddy gracefully if it's running
 		if caddyCmd.Process != nil {
 			slog.Info("stopping Caddy server")
