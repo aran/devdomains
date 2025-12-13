@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -84,7 +84,7 @@ func DoHHandlerMulti(targetDomains []string) http.HandlerFunc {
 		// Get response message
 		resp, err := handleDNSQueryMulti(msg, targetDomains)
 		if err != nil {
-			log.Printf("Error handling DNS query: %v", err)
+			slog.Error("error handling DNS query", "error", err)
 			http.Error(w, "DNS resolution error", http.StatusInternalServerError)
 			return
 		}
@@ -109,7 +109,7 @@ func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, erro
 		qname := strings.TrimSuffix(q.Name, ".")
 
 		// Log the DNS query
-		log.Printf("DNS Query: type=%s name=%s", dns.TypeToString[q.Qtype], q.Name)
+		slog.Debug("DNS query", "type", dns.TypeToString[q.Qtype], "name", q.Name)
 
 		// Check if this is a request for one of our target domains or their subdomains
 		matchedDomain := ""
@@ -150,7 +150,7 @@ func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, erro
 							A: ipv4,
 						}
 						response.Answer = append(response.Answer, rr)
-						log.Printf("DNS Response: A record for %s -> %s", q.Name, ipv4.String())
+						slog.Debug("DNS response", "type", "A", "name", q.Name, "ip", ipv4.String())
 						handled = true
 						break // Only include one answer for simplicity
 					}
@@ -170,7 +170,7 @@ func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, erro
 							AAAA: ip,
 						}
 						response.Answer = append(response.Answer, rr)
-						log.Printf("DNS Response: AAAA record for %s -> %s", q.Name, ip.String())
+						slog.Debug("DNS response", "type", "AAAA", "name", q.Name, "ip", ip.String())
 						handled = true
 						break // Only include one answer for simplicity
 					}
@@ -178,14 +178,12 @@ func handleDNSQueryMulti(query *dns.Msg, targetDomains []string) (*dns.Msg, erro
 			default:
 				// For unsupported record types, we return NOERROR with empty answer section
 				// This is the correct behavior according to RFC 1035 for authoritative servers
-				log.Printf("DNS Query for unsupported type %s (code %d) for %s", 
-					dns.TypeToString[q.Qtype], q.Qtype, q.Name)
+				slog.Debug("DNS query for unsupported type", "type", dns.TypeToString[q.Qtype], "code", q.Qtype, "name", q.Name)
 				// response.Rcode is already NOERROR (0) by default
 			}
-			
+
 			if !handled {
-				log.Printf("DNS Response: NOERROR with empty answer for %s type %s", 
-					q.Name, dns.TypeToString[q.Qtype])
+				slog.Debug("DNS response NOERROR with empty answer", "name", q.Name, "type", dns.TypeToString[q.Qtype])
 			}
 			
 			return response, nil
@@ -218,12 +216,12 @@ func forwardToUpstreamServers(query *dns.Msg, upstreams []string) (*dns.Msg, err
 		resp, _, err := client.Exchange(query, upstream)
 		if err == nil && resp != nil {
 			if len(query.Question) > 0 {
-				log.Printf("DNS Response: forwarded %s to upstream %s", query.Question[0].Name, upstream)
+				slog.Debug("DNS response forwarded", "name", query.Question[0].Name, "upstream", upstream)
 			}
 			return resp, nil
 		}
 		if err != nil {
-			log.Printf("DNS upstream %s failed: %v", upstream, err)
+			slog.Debug("DNS upstream failed", "upstream", upstream, "error", err)
 		}
 	}
 
@@ -241,7 +239,7 @@ func handleDNSQueryWithUpstreams(query *dns.Msg, targetDomains []string, upstrea
 		qname := strings.TrimSuffix(q.Name, ".")
 
 		// Log the DNS query
-		log.Printf("DNS Query: type=%s name=%s", dns.TypeToString[q.Qtype], q.Name)
+		slog.Debug("DNS query", "type", dns.TypeToString[q.Qtype], "name", q.Name)
 
 		// Check if this is a request for one of our target domains or their subdomains
 		matchedDomain := ""
@@ -282,7 +280,7 @@ func handleDNSQueryWithUpstreams(query *dns.Msg, targetDomains []string, upstrea
 							A: ipv4,
 						}
 						response.Answer = append(response.Answer, rr)
-						log.Printf("DNS Response: A record for %s -> %s", q.Name, ipv4.String())
+						slog.Debug("DNS response", "type", "A", "name", q.Name, "ip", ipv4.String())
 						handled = true
 						break // Only include one answer for simplicity
 					}
@@ -302,7 +300,7 @@ func handleDNSQueryWithUpstreams(query *dns.Msg, targetDomains []string, upstrea
 							AAAA: ip,
 						}
 						response.Answer = append(response.Answer, rr)
-						log.Printf("DNS Response: AAAA record for %s -> %s", q.Name, ip.String())
+						slog.Debug("DNS response", "type", "AAAA", "name", q.Name, "ip", ip.String())
 						handled = true
 						break // Only include one answer for simplicity
 					}
@@ -310,14 +308,12 @@ func handleDNSQueryWithUpstreams(query *dns.Msg, targetDomains []string, upstrea
 			default:
 				// For unsupported record types, we return NOERROR with empty answer section
 				// This is the correct behavior according to RFC 1035 for authoritative servers
-				log.Printf("DNS Query for unsupported type %s (code %d) for %s", 
-					dns.TypeToString[q.Qtype], q.Qtype, q.Name)
+				slog.Debug("DNS query for unsupported type", "type", dns.TypeToString[q.Qtype], "code", q.Qtype, "name", q.Name)
 				// response.Rcode is already NOERROR (0) by default
 			}
-			
+
 			if !handled {
-				log.Printf("DNS Response: NOERROR with empty answer for %s type %s", 
-					q.Name, dns.TypeToString[q.Qtype])
+				slog.Debug("DNS response NOERROR with empty answer", "name", q.Name, "type", dns.TypeToString[q.Qtype])
 			}
 			
 			return response, nil

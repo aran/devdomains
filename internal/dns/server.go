@@ -2,7 +2,7 @@ package dns
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 
@@ -74,13 +74,13 @@ func (s *Server) Start() error {
 		Net:  "udp",
 	}
 
-	log.Printf("Starting DNS server on %s (UDP)", addr)
-	log.Printf("DNS server will resolve domains: %s", strings.Join(s.domains, ", "))
+	slog.Info("starting DNS server", "addr", addr, "protocol", "UDP")
+	slog.Info("DNS server will resolve domains", "domains", strings.Join(s.domains, ", "))
 
 	// Start the server in a goroutine
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil {
-			log.Printf("DNS server error: %v", err)
+			slog.Error("DNS server error", "error", err)
 		}
 	}()
 
@@ -100,7 +100,7 @@ func (s *Server) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	// Use the same resolution logic as DoH, with our configured upstreams
 	response, err := handleDNSQueryWithUpstreams(r, s.domains, s.upstreams)
 	if err != nil {
-		log.Printf("DNS server error handling query: %v", err)
+		slog.Error("DNS server error handling query", "error", err)
 		// Send a SERVFAIL response
 		m := new(dns.Msg)
 		m.SetReply(r)
@@ -111,7 +111,7 @@ func (s *Server) handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 	// Send the response
 	if err := w.WriteMsg(response); err != nil {
-		log.Printf("DNS server error writing response: %v", err)
+		slog.Error("DNS server error writing response", "error", err)
 	}
 }
 
@@ -127,11 +127,11 @@ func (s *Server) StartTCP() error {
 		Net:  "tcp",
 	}
 
-	log.Printf("Starting DNS server on TCP port %d", s.port)
+	slog.Info("starting DNS server", "port", s.port, "protocol", "TCP")
 
 	go func() {
 		if err := tcpServer.ListenAndServe(); err != nil {
-			log.Printf("DNS TCP server error: %v", err)
+			slog.Error("DNS TCP server error", "error", err)
 		}
 	}()
 
@@ -175,7 +175,7 @@ func (s *Server) TestResolution(domain string) error {
 	// Check if we got an A record
 	for _, ans := range response.Answer {
 		if a, ok := ans.(*dns.A); ok {
-			log.Printf("DNS test resolution: %s -> %s", domain, a.A.String())
+			slog.Debug("DNS test resolution", "domain", domain, "ip", a.A.String())
 			return nil
 		}
 	}

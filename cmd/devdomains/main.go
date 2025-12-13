@@ -1,10 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"github.com/aran/devdomains/internal/html"
 	"github.com/aran/devdomains/internal/mdns"
 	"github.com/aran/devdomains/internal/network"
+	"github.com/aran/devdomains/internal/output"
 	"github.com/aran/devdomains/internal/profile"
 	"github.com/aran/devdomains/internal/version"
 	"github.com/aran/devdomains/internal/wireguard"
@@ -53,7 +53,7 @@ type Config struct {
 func main() {
 	var domainMappingStrings []string
 
-	log.SetPrefix("[devdomains] ")
+	slog.SetDefault(slog.New(slog.NewTextHandler(output.Stdout, nil)))
 	cfg := Config{
 		ServerPort:  9999,
 		TargetHost:  "localhost",
@@ -69,7 +69,8 @@ func main() {
 serves DNS over HTTPS, and configures Caddy to proxy requests to your local services.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(domainMappingStrings) == 0 {
-				log.Fatalf("Error: At least one --domain mapping is required")
+				slog.Error("at least one --domain mapping is required")
+				os.Exit(1)
 			}
 
 			// Parse domain mappings from command line
@@ -80,7 +81,8 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 				// Split domain from port mappings
 				firstColonIndex := strings.Index(domainMapping, ":")
 				if firstColonIndex == -1 {
-					log.Fatalf("Invalid domain mapping format: %s. Use domain:externalPort:internalPort[,...]", domainMapping)
+					slog.Error("invalid domain mapping format", "mapping", domainMapping, "expected", "domain:externalPort:internalPort[,...]")
+					os.Exit(1)
 				}
 
 				domain := domainMapping[:firstColonIndex]
@@ -92,17 +94,20 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 					// Split each port mapping by colon
 					portParts := strings.Split(portPairSpec, ":")
 					if len(portParts) != 2 {
-						log.Fatalf("Invalid port mapping format: %s. Use externalPort:internalPort", portPairSpec)
+						slog.Error("invalid port mapping format", "mapping", portPairSpec, "expected", "externalPort:internalPort")
+						os.Exit(1)
 					}
 
 					externalPort, err := strconv.Atoi(portParts[0])
 					if err != nil {
-						log.Fatalf("Invalid external port: %s", portParts[0])
+						slog.Error("invalid external port", "port", portParts[0])
+						os.Exit(1)
 					}
 
 					internalPort, err := strconv.Atoi(portParts[1])
 					if err != nil {
-						log.Fatalf("Invalid internal port: %s", portParts[1])
+						slog.Error("invalid internal port", "port", portParts[1])
+						os.Exit(1)
 					}
 
 					// Add this port mapping to the domain's list
@@ -156,7 +161,8 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 	rootCmd.SetVersionTemplate(version.Info())
 	
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatalf("Error executing command: %v", err)
+		slog.Error("error executing command", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -164,32 +170,35 @@ serves DNS over HTTPS, and configures Caddy to proxy requests to your local serv
 func runDNSServer(cmd *cobra.Command, args []string) {
 	bindAddr, _ := cmd.Flags().GetString("bind")
 	domains, _ := cmd.Flags().GetStringSlice("domains")
-	
+
 	// Parse bind address to get IP and port
 	host, portStr, err := net.SplitHostPort(bindAddr)
 	if err != nil {
-		log.Fatalf("Invalid bind address: %v", err)
+		slog.Error("invalid bind address", "error", err)
+		os.Exit(1)
 	}
-	
+
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		log.Fatalf("Invalid port: %v", err)
+		slog.Error("invalid port", "error", err)
+		os.Exit(1)
 	}
-	
+
 	// Start DNS server using existing code
 	dnsServer := dns.NewServerWithAddress(domains, host, port)
 	if err := dnsServer.Start(); err != nil {
-		log.Fatalf("Failed to start DNS server: %v", err)
+		slog.Error("failed to start DNS server", "error", err)
+		os.Exit(1)
 	}
-	
-	log.Printf("DNS server running on %s for domains: %v", bindAddr, domains)
-	
+
+	slog.Info("DNS server running", "address", bindAddr, "domains", domains)
+
 	// Block until signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
-	
-	log.Println("DNS server shutting down")
+
+	slog.Info("DNS server shutting down")
 	dnsServer.Stop()
 }
 
@@ -200,7 +209,8 @@ func run(cfg Config) {
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("Failed to get current working directory: %v", err)
+		slog.Error("failed to get current working directory", "error", err)
+		os.Exit(1)
 	}
 
 	profileManager := profile.NewProfileManager(cwd)
@@ -260,53 +270,58 @@ func run(cfg Config) {
 	var wgServer *wireguard.Server
 	var dnsProcess *exec.Cmd
 	if cfg.EnableWireGuard {
-		log.Println("WireGuard mode enabled - setting up VPN server...")
-		
+		slog.Info("WireGuard mode enabled - setting up VPN server")
+
 		ctx := context.Background()
 		wgServer, err = wireguard.NewServer(ctx, cwd)
 		if err != nil {
-			log.Fatalf("Failed to create WireGuard server: %v", err)
+			slog.Error("failed to create WireGuard server", "error", err)
+			os.Exit(1)
 		}
-		
+
 		// Initialize WireGuard (load/generate keys and configs)
 		if err := wgServer.Initialize(); err != nil {
-			log.Fatalf("Failed to initialize WireGuard: %v", err)
+			slog.Error("failed to initialize WireGuard", "error", err)
+			os.Exit(1)
 		}
-		
+
 		// Start WireGuard interface
 		if err := wgServer.Start(); err != nil {
-			log.Fatalf("Failed to start WireGuard: %v", err)
+			slog.Error("failed to start WireGuard", "error", err)
+			os.Exit(1)
 		}
 		defer wgServer.Stop()
-		
+
 		// Start DNS server as privileged subprocess
 		// Use os.Executable() to get the actual binary path, which works with 'go run'
 		binaryPath, err := os.Executable()
 		if err != nil {
-			log.Fatalf("Could not determine executable path: %v", err)
+			slog.Error("could not determine executable path", "error", err)
+			os.Exit(1)
 		}
-		
+
 		dnsProcess = exec.Command("sudo", binaryPath, "dns",
 			"--bind", fmt.Sprintf("%s:53", wgServer.GetServerIP()),
 			"--domains", strings.Join(allDomains, ","))
-		
-		// Pipe all output so users can see DNS server logs
-		dnsProcess.Stdout = os.Stdout
-		dnsProcess.Stderr = os.Stderr
+
+		// Pipe all output through synchronized writer
+		dnsProcess.Stdout = output.Stdout
+		dnsProcess.Stderr = output.Stdout
 		dnsProcess.Stdin = os.Stdin // Allow sudo password prompt
-		
+
 		if err := dnsProcess.Start(); err != nil {
-			log.Fatalf("Failed to start DNS server: %v", err)
+			slog.Error("failed to start DNS server", "error", err)
+			os.Exit(1)
 		}
-		
+
 		// Ensure DNS process is killed on exit
 		defer func() {
 			if dnsProcess != nil && dnsProcess.Process != nil {
 				dnsProcess.Process.Kill()
 			}
 		}()
-		
-		log.Printf("DNS server started on %s:53", wgServer.GetServerIP())
+
+		slog.Info("DNS server started", "address", wgServer.GetServerIP()+":53")
 		
 		// Add WireGuard config download endpoint
 		http.HandleFunc("/wg-client.conf", func(w http.ResponseWriter, r *http.Request) {
@@ -339,7 +354,7 @@ func run(cfg Config) {
 			w.Write(png)
 		})
 		
-		log.Println("WireGuard server ready - client config available at /wg-client.conf and QR code at /wireguard-qr.png")
+		slog.Info("WireGuard server ready", "config_url", "/wg-client.conf", "qr_url", "/wireguard-qr.png")
 	}
 
 	serviceConfig := mdns.DefaultServiceConfig
@@ -349,7 +364,8 @@ func run(cfg Config) {
 
 	mdnsServer, err := mdns.SetupServer(serviceConfig)
 	if err != nil {
-		log.Fatalf("Failed to setup mDNS server: %v", err)
+		slog.Error("failed to setup mDNS server", "error", err)
+		os.Exit(1)
 	}
 	defer mdnsServer.Shutdown()
 
@@ -379,19 +395,19 @@ func run(cfg Config) {
 	// Generate Caddy config with port forwarding for all domains
 	certGenerated, profileGenerated, err := caddy.GenerateConfig(mdnsHostnames, caddyDomainMappings, cfg.ServerPort, caddyConfigPath)
 	if err != nil {
-		log.Printf("Warning: Failed to generate Caddy configuration: %v", err)
+		slog.Warn("failed to generate Caddy configuration", "error", err)
 	} else {
 		absPath, err := filepath.Abs(caddyConfigPath)
 		if err != nil {
 			absPath = caddyConfigPath
 		}
 
-		log.Printf("Caddy configuration generated at: %s", absPath)
+		slog.Info("Caddy configuration generated", "path", absPath)
 
 		if certGenerated {
-			log.Printf("Self-signed TLS certificates have been generated for HTTPS")
+			slog.Info("self-signed TLS certificates have been generated for HTTPS")
 		} else {
-			log.Printf("Using existing TLS certificates for HTTPS")
+			slog.Info("using existing TLS certificates for HTTPS")
 		}
 
 		if profileGenerated {
@@ -400,18 +416,19 @@ func run(cfg Config) {
 			if err != nil {
 				absProfilePath = profilePath
 			}
-			log.Printf("Apple provisioning profile generated at: %s", absProfilePath)
+			slog.Info("Apple provisioning profile generated", "path", absProfilePath)
 		}
 
-		log.Printf("🚀 Caddy will be started automatically as a reverse proxy")
+		slog.Info("Caddy will be started automatically as a reverse proxy")
 
 		// Print information about accessing the target domains
 		if len(cfg.DomainMappings) > 0 {
-			log.Printf("🔗 After installing the profile, access your local services at:")
+			slog.Info("after installing the profile, access your local services at:")
 			for _, domainMapping := range cfg.DomainMappings {
 				for _, mapping := range domainMapping.PortMappings {
-					log.Printf("   https://%s:%d → %s:%d",
-						domainMapping.Domain, mapping.ExternalPort, cfg.TargetHost, mapping.InternalPort)
+					slog.Info("service mapping",
+						"external", fmt.Sprintf("https://%s:%d", domainMapping.Domain, mapping.ExternalPort),
+						"internal", fmt.Sprintf("%s:%d", cfg.TargetHost, mapping.InternalPort))
 				}
 			}
 		}
@@ -421,44 +438,22 @@ func run(cfg Config) {
 	mdnsHost := strings.TrimSuffix(serviceConfig.Hostname, ".")
 
 	// Start Caddy as a subprocess
-	log.Printf("Starting Caddy server for HTTPS and DNS-over-HTTPS...")
+	slog.Info("starting Caddy server for HTTPS and DNS-over-HTTPS")
 	caddyCmd := exec.Command("caddy", "run", "--watch")
 
-	// Create a pipe for Caddy's stdout and stderr
-	caddyStdoutPipe, err := caddyCmd.StdoutPipe()
-	if err != nil {
-		log.Printf("Warning: Failed to create pipe for Caddy output: %v", err)
-	} else {
-		go func() {
-			scanner := bufio.NewScanner(caddyStdoutPipe)
-			for scanner.Scan() {
-				// Use fmt because Caddy will format itself
-				fmt.Printf("[Caddy] %s\n", scanner.Text())
-			}
-		}()
-	}
-
-	caddyStderrPipe, err := caddyCmd.StderrPipe()
-	if err != nil {
-		log.Printf("Warning: Failed to create pipe for Caddy error output: %v", err)
-	} else {
-		go func() {
-			scanner := bufio.NewScanner(caddyStderrPipe)
-			for scanner.Scan() {
-				fmt.Printf("[Caddy] %s\n", scanner.Text())
-			}
-		}()
-	}
+	// Pipe Caddy output directly through sync writer (preserves Caddy's native format)
+	caddyCmd.Stdout = output.Stdout
+	caddyCmd.Stderr = output.Stdout
 
 	// Variable to track if Caddy is running
 	var caddyRunning bool
 
 	// Start Caddy
 	if err := caddyCmd.Start(); err != nil {
-		log.Printf("Warning: Failed to start Caddy: %v", err)
-		log.Printf("DNS-over-HTTPS self-test will be skipped")
+		slog.Warn("failed to start Caddy", "error", err)
+		slog.Warn("DNS-over-HTTPS self-test will be skipped")
 	} else {
-		log.Printf("Caddy started successfully (PID: %d)", caddyCmd.Process.Pid)
+		slog.Info("Caddy started successfully", "pid", caddyCmd.Process.Pid)
 		caddyRunning = true
 
 		// Run DNS self-tests after servers start
@@ -478,25 +473,25 @@ func run(cfg Config) {
 
 				// DNS-over-HTTPS tests
 				if caddyRunning {
-					log.Printf("Running DNS-over-HTTPS self-test for domain: %s", domain)
+					slog.Info("running DNS-over-HTTPS self-test", "domain", domain)
 
 					// Try GET method first
 					err := dns.RunSelfTest(testOpts)
 					if err != nil {
-						log.Printf("⚠️ DNS-over-HTTPS GET self-test for %s failed: %v", domain, err)
+						slog.Warn("DNS-over-HTTPS GET self-test failed", "domain", domain, "error", err)
 
 						// If GET failed, try POST method as a fallback
 						err = dns.RunSelfTestPost(testOpts)
 						if err != nil {
-							log.Printf("⚠️ DNS-over-HTTPS POST self-test for %s also failed: %v", domain, err)
-							log.Printf("⚠️ Note: The self-test failure doesn't prevent the server from running")
-							log.Printf("⚠️ DNS resolution for %s might not work correctly until the issue is resolved", domain)
+							slog.Warn("DNS-over-HTTPS POST self-test also failed", "domain", domain, "error", err)
+							slog.Warn("self-test failure doesn't prevent the server from running")
+							slog.Warn("DNS resolution might not work correctly until the issue is resolved", "domain", domain)
 						} else {
-							log.Printf("✓ DNS-over-HTTPS POST self-test for %s passed successfully", domain)
+							slog.Info("DNS-over-HTTPS POST self-test passed", "domain", domain)
 						}
 					}
 				} else {
-					log.Printf("⚠️ Skipping DNS-over-HTTPS self-test: Caddy is not running")
+					slog.Warn("skipping DNS-over-HTTPS self-test: Caddy is not running")
 				}
 
 			}
@@ -508,44 +503,45 @@ func run(cfg Config) {
 	
 	go func() {
 		<-stop
-		log.Println("\nShutting down...")
-		
+		slog.Info("shutting down")
+
 		// Kill DNS subprocess if running
 		if dnsProcess != nil && dnsProcess.Process != nil {
-			log.Println("Stopping DNS server...")
+			slog.Info("stopping DNS server")
 			dnsProcess.Process.Kill()
 		}
-		
+
 		// Stop WireGuard if running
 		if wgServer != nil {
-			log.Println("Stopping WireGuard...")
+			slog.Info("stopping WireGuard")
 			wgServer.Stop()
 		}
-		
+
 		// Stop Caddy gracefully if it's running
 		if caddyCmd.Process != nil {
-			log.Printf("Stopping Caddy server...")
+			slog.Info("stopping Caddy server")
 			if err := caddyCmd.Process.Signal(os.Interrupt); err != nil {
-				log.Printf("Error sending interrupt signal to Caddy: %v", err)
+				slog.Error("error sending interrupt signal to Caddy", "error", err)
 				// Force kill if interrupt doesn't work
 				if err := caddyCmd.Process.Kill(); err != nil {
-					log.Printf("Error killing Caddy process: %v", err)
+					slog.Error("error killing Caddy process", "error", err)
 				}
 			}
 		}
-		
+
 		// Shutdown HTTP server
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		server.Shutdown(ctx)
 	}()
-	
+
 	// Start HTTP server (blocking)
-	log.Printf("HTTP server starting on :%d", cfg.ServerPort)
-	log.Printf("Access local server at http://%s:%d", mdnsHost, cfg.ServerPort)
+	slog.Info("HTTP server starting", "port", cfg.ServerPort)
+	slog.Info("access local server", "url", fmt.Sprintf("http://%s:%d", mdnsHost, cfg.ServerPort))
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("HTTP server error: %v", err)
+		slog.Error("HTTP server error", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("Servers exited gracefully")
+	slog.Info("servers exited gracefully")
 }

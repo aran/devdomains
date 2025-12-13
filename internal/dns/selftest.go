@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -42,7 +42,7 @@ func RunSelfTest(opts SelfTestOptions) error {
 	}
 	
 	// Log that we're starting a self-test
-	log.Printf("Running DNS-over-HTTPS self-test for domain: %s", opts.TargetDomain)
+	slog.Info("running DNS-over-HTTPS self-test", "domain", opts.TargetDomain)
 	
 	// Ensure the domain ends with a dot as required by DNS
 	queryDomain := opts.TargetDomain
@@ -154,10 +154,11 @@ func RunSelfTest(opts SelfTestOptions) error {
 	}
 	
 	// Log success result
-	log.Printf("Self-test SUCCESS: DNS-over-HTTPS query for %s completed in %.2fms", 
-		opts.TargetDomain, float64(duration.Microseconds())/1000.0)
-	log.Printf("Received %d answers with IP(s): %s", 
-		len(response.Answer), strings.Join(ips, ", "))
+	slog.Info("self-test SUCCESS: DNS-over-HTTPS query completed",
+		"domain", opts.TargetDomain,
+		"duration_ms", float64(duration.Microseconds())/1000.0,
+		"answers", len(response.Answer),
+		"ips", strings.Join(ips, ", "))
 	
 	// Also test with an unsupported query type
 	RunSelfTestUnsupportedType(opts)
@@ -172,7 +173,7 @@ func RunSelfTestUnsupportedType(opts SelfTestOptions) error {
 	}
 	
 	// Log that we're starting a self-test for an unsupported record type
-	log.Printf("Running DNS-over-HTTPS self-test for unsupported record type on domain: %s", opts.TargetDomain)
+	slog.Info("running DNS-over-HTTPS self-test for unsupported record type", "domain", opts.TargetDomain)
 	
 	// Ensure the domain ends with a dot as required by DNS
 	queryDomain := opts.TargetDomain
@@ -262,9 +263,10 @@ func RunSelfTestUnsupportedType(opts SelfTestOptions) error {
 	}
 	
 	// Log success result
-	log.Printf("Self-test SUCCESS: Unsupported record type (TXT) query for %s completed in %.2fms", 
-		opts.TargetDomain, float64(duration.Microseconds())/1000.0)
-	log.Printf("Correctly received NOERROR with empty answer section")
+	slog.Info("self-test SUCCESS: unsupported record type (TXT) query completed",
+		"domain", opts.TargetDomain,
+		"duration_ms", float64(duration.Microseconds())/1000.0,
+		"result", "NOERROR with empty answer section")
 	
 	return nil
 }
@@ -276,7 +278,7 @@ func RunSelfTestPost(opts SelfTestOptions) error {
 	}
 	
 	// Log that we're starting a self-test
-	log.Printf("Running DNS-over-HTTPS self-test (POST method) for domain: %s", opts.TargetDomain)
+	slog.Info("running DNS-over-HTTPS self-test (POST method)", "domain", opts.TargetDomain)
 	
 	// Ensure the domain ends with a dot as required by DNS
 	queryDomain := opts.TargetDomain
@@ -379,10 +381,11 @@ func RunSelfTestPost(opts SelfTestOptions) error {
 	}
 	
 	// Log success result
-	log.Printf("Self-test POST SUCCESS: DNS-over-HTTPS query for %s completed in %.2fms", 
-		opts.TargetDomain, float64(duration.Microseconds())/1000.0)
-	log.Printf("Received %d answers with IP(s): %s", 
-		len(response.Answer), strings.Join(ips, ", "))
+	slog.Info("self-test POST SUCCESS: DNS-over-HTTPS query completed",
+		"domain", opts.TargetDomain,
+		"duration_ms", float64(duration.Microseconds())/1000.0,
+		"answers", len(response.Answer),
+		"ips", strings.Join(ips, ", "))
 	
 	return nil
 }

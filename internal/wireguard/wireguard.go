@@ -3,13 +3,15 @@ package wireguard
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/aran/devdomains/internal/output"
 )
 
 // Server manages the WireGuard server configuration and lifecycle
@@ -62,7 +64,7 @@ func NewServer(ctx context.Context, workingDir string) (*Server, error) {
 
 // Initialize sets up the WireGuard server, loading existing keys or generating new ones
 func (s *Server) Initialize() error {
-	log.Println("Initializing WireGuard server...")
+	slog.Info("initializing WireGuard server")
 	
 	// Check prerequisites
 	if err := s.checkPrerequisites(); err != nil {
@@ -84,7 +86,7 @@ func (s *Server) Initialize() error {
 		return fmt.Errorf("failed to generate client config: %w", err)
 	}
 	
-	log.Println("WireGuard server initialized successfully")
+	slog.Info("WireGuard server initialized successfully")
 	return nil
 }
 
@@ -94,23 +96,23 @@ func (s *Server) Start() error {
 	
 	// Check if interface is already up
 	if s.isInterfaceUp() {
-		log.Println("WireGuard interface is already up")
+		slog.Info("WireGuard interface is already up")
 		return nil
 	}
-	
-	log.Println("Starting WireGuard interface...")
+
+	slog.Info("starting WireGuard interface")
 	
 	// Use wg-quick to bring up the interface
 	cmd := exec.CommandContext(s.ctx, "sudo", "wg-quick", "up", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = output.Stdout
+	cmd.Stderr = output.Stdout
 	cmd.Stdin = os.Stdin
 	
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start WireGuard: %w", err)
 	}
-	
-	log.Printf("WireGuard interface started successfully on %s", s.serverIP)
+
+	slog.Info("WireGuard interface started successfully", "ip", s.serverIP)
 	return nil
 }
 
@@ -118,17 +120,17 @@ func (s *Server) Start() error {
 func (s *Server) Stop() error {
 	configPath := filepath.Join(s.workingDir, "wg0.conf")
 
-	log.Println("Stopping WireGuard interface...")
+	slog.Info("stopping WireGuard interface")
 
 	cmd := exec.CommandContext(s.ctx, "sudo", "wg-quick", "down", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = output.Stdout
+	cmd.Stderr = output.Stdout
 	cmd.Stdin = os.Stdin
 
 	if err := cmd.Run(); err != nil {
-		log.Printf("Warning: wg-quick down failed: %v", err)
+		slog.Warn("wg-quick down failed", "error", err)
 	} else {
-		log.Println("WireGuard interface stopped")
+		slog.Info("WireGuard interface stopped")
 	}
 
 	return nil
@@ -181,7 +183,7 @@ func (s *Server) loadOrGenerateKeys() error {
 	
 	// Try to load existing keys
 	if s.keysExist() {
-		log.Println("Loading existing WireGuard keys...")
+		slog.Info("loading existing WireGuard keys")
 		
 		serverPrivate, err := os.ReadFile(serverPrivateKeyPath)
 		if err != nil {
@@ -206,13 +208,13 @@ func (s *Server) loadOrGenerateKeys() error {
 			return err
 		}
 		s.clientPublicKey = strings.TrimSpace(string(clientPublic))
-		
-		log.Println("Loaded existing WireGuard keys")
+
+		slog.Info("loaded existing WireGuard keys")
 		return nil
 	}
-	
+
 	// Generate new keys
-	log.Println("Generating new WireGuard keys...")
+	slog.Info("generating new WireGuard keys")
 	
 	// Generate server keys
 	serverPrivate, serverPublic, err := s.generateKeyPair()
@@ -243,8 +245,8 @@ func (s *Server) loadOrGenerateKeys() error {
 	if err := os.WriteFile(clientPublicKeyPath, []byte(s.clientPublicKey), 0644); err != nil {
 		return err
 	}
-	
-	log.Println("Generated and saved new WireGuard keys")
+
+	slog.Info("generated and saved new WireGuard keys")
 	return nil
 }
 
@@ -305,8 +307,8 @@ AllowedIPs = %s/32
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		return fmt.Errorf("failed to write server config: %w", err)
 	}
-	
-	log.Println("Generated WireGuard server configuration")
+
+	slog.Info("generated WireGuard server configuration")
 	return nil
 }
 
@@ -328,8 +330,8 @@ PersistentKeepalive = 25
 	if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
 		return fmt.Errorf("failed to write client config: %w", err)
 	}
-	
-	log.Println("Generated WireGuard client configuration")
+
+	slog.Info("generated WireGuard client configuration")
 	return nil
 }
 

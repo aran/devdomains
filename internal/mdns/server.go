@@ -2,7 +2,7 @@ package mdns
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 
@@ -65,13 +65,13 @@ func SetupServer(config ServiceConfig) (*mdns.Server, error) {
 		}
 	}
 
-	log.Printf("mDNS server started, advertising:")
-	log.Printf("- Service: %s.%s.%s", config.Name, config.Type, config.Domain)
-	log.Printf("- Hostname: %s", config.Hostname[:len(config.Hostname)-1]) // Remove trailing dot for display
-	log.Printf("- Port: %d", config.Port)
-	log.Printf("- IPv4 Addresses (A records): %v", ipv4s)
-	log.Printf("- IPv6 Addresses (AAAA records): %v", ipv6s)
-	log.Printf("- System hostname: %s", sysHostname)
+	slog.Info("mDNS server started",
+		"service", fmt.Sprintf("%s.%s.%s", config.Name, config.Type, config.Domain),
+		"hostname", config.Hostname[:len(config.Hostname)-1],
+		"port", config.Port,
+		"ipv4_addresses", ipv4s,
+		"ipv6_addresses", ipv6s,
+		"system_hostname", sysHostname)
 
 	return server, nil
 }
